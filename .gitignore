@@ -38,3 +38,5 @@ rsconnect/
 data/*
 
 *.Rproj
+
+logs

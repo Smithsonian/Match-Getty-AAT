@@ -11,7 +11,8 @@ find_aat <- function(which_row){
   getty_url <- "http://vocab.getty.edu/sparql.json?query="
   
   if (!is.na(this_row$linked_aat_term)){
-    getty_query <- "select ?subj ?ScopeNote {?subj gvp:prefLabelGVP/xl:literalForm \"%s\"@en; skos:inScheme aat:; 
+    getty_query <- "select ?subj ?ScopeNote {?subj gvp:prefLabelGVP/xl:literalForm \"%s\"@en; 
+                        skos:inScheme aat:; 
                         optional {?subj skos:scopeNote [dct:language gvp_lang:en; rdf:value ?ScopeNote]}
   }"
     
@@ -35,6 +36,7 @@ find_aat <- function(which_row){
   
   getty_query <- "select ?Subject ?Term ?ScopeNote {
                     ?Subject rdfs:label \"%s\"@en;
+                    skos:inScheme aat:; 
                     gvp:prefLabelGVP [xl:literalForm ?Term];
                     optional {?Subject skos:scopeNote [dct:language gvp_lang:en; rdf:value ?ScopeNote]}}"
   
