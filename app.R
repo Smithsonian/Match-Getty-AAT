@@ -13,17 +13,13 @@ library(parallel)
 
 #Settings----
 app_name <- "Match Getty AAT"
-app_ver <- "0.2.1"
+app_ver <- "0.3.0"
 github_link <- "https://github.com/Smithsonian/Match-Getty-AAT"
 csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
 options(stringsAsFactors = FALSE)
 options(encoding = 'UTF-8')
-
-
-#Logfile----
+#Logfile
 logfile <- paste0("logs/", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
-
-
 #load functions
 source("functions.R")
 
@@ -35,7 +31,7 @@ ui <- fluidPage(
   titlePanel(app_name),
 
   tabsetPanel(type = "tabs",
-      tabPanel("Find Subject - By Keywords",
+      tabPanel("Batch Matching of Subjects",
          fluidRow(
            column(width = 4, 
                   br(),
@@ -44,13 +40,13 @@ ui <- fluidPage(
            ),
            column(width = 8,
                   br(),
-                  uiOutput("aatresult")
+                  withSpinner(uiOutput("aatresult"))
            )
          ),
          hr(),
          withSpinner(DT::dataTableOutput("table1f"))
       ),
-      tabPanel("Find Subject - Full Text",
+      tabPanel("Select Subject - Full Text Search",
         fluidRow(
             column(width = 4, 
                    br(),
@@ -61,7 +57,7 @@ ui <- fluidPage(
                      ),
                      column(width = 3, 
                             br(),
-                            uiOutput("nextBin")
+                            uiOutput("nextButton")
                     )
                   )
             ),
@@ -80,12 +76,42 @@ ui <- fluidPage(
               )
           )
       ),
+      #Help tab
       tabPanel("Help", 
            br(),
            fluidRow(
-             #Help----
              column(width = 6,
-                    uiOutput("help1")
+                    HTML("<p>This app will take the string in the column
+                          \"term\" and match it with the The Art & Architecture
+                          Thesaurus using their Linked Open Data portal.</p>
+                        <p>Matching methods:</p>
+                         <ul>
+                           <li>Batch Matching of Subjects: Automated match 
+                              based on the term and keywords.</li>
+                           <li>Select Subject - Full Text Search: Select the 
+                              appropiate match by searching in term names, 
+                              notes, and other fields.</li>
+                         </ul>")
+             )
+           ),
+           fluidRow(
+             column(width = 6,
+                    HTML("<div class=\"panel panel-primary\"> 
+                            <div class=\"panel-heading\"> 
+                              <h3 class=\"panel-title\">Batch Matching of Subjects</h3>
+                            </div>
+                            <div class=\"panel-body\">
+                               Coming soon...
+                            </div></div>")
+             ),
+             column(width = 6,
+                    HTML("<div class=\"panel panel-primary\"> 
+                            <div class=\"panel-heading\"> 
+                              <h3 class=\"panel-title\">Select Subject - Full Text Search</h3>
+                            </div>
+                            <div class=\"panel-body\">
+                               Coming soon...
+                            </div></div>")
              )
            )
       )
@@ -97,11 +123,10 @@ ui <- fluidPage(
 
 
 
-
 #Server----
 server <- function(input, output, session) {
   
-  #Logging----
+  #Logging
   dir.create('logs', showWarnings = FALSE)
   flog.logger("getty", INFO, appender=appender.file(logfile))
   
@@ -122,6 +147,7 @@ server <- function(input, output, session) {
   })
   
   
+  
   #choose_string----
   output$choose_string <- renderUI({
     req(input$csvinput)
@@ -132,7 +158,7 @@ server <- function(input, output, session) {
     if (class(csvinput) == "try-error"){
         flog.error(paste0("Error reading CSV: ", csvinput), name = "csv")
       }else{
-        #CSV to sqlite----
+        #CSV to sqlite
         csv_to_sqlite(csv_database, csvinput)
       }
     
@@ -142,23 +168,6 @@ server <- function(input, output, session) {
     selectInput("row", "Select row to find a match in the AAT:", as.list(paste0(csvinput$term, " (", csvinput$id, ")")), width = "100%", multiple = FALSE, selectize = FALSE)
   })
   
-  
-  #match_type----
-  # output$match_type <- renderUI({
-  #   req(input$csvinput)
-  #   tagList(
-  #     HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Search type</h3> </div> <div class=\"panel-body\">"),
-  #     radioGroupButtons("matchtype", "Where to search:",
-  #                       choiceNames = c("Term name only", "Term, notes, etc."),
-  #                       choiceValues = c(1, 2),
-  #                       direction = "horizontal",
-  #                       individual = TRUE,
-  #                       status = "primary",
-  #                       selected = 1,
-  #                       size = "sm"),
-  #     HTML("</div></div>")
-  #   )
-  # })
   
   
   #aattop----
@@ -183,6 +192,7 @@ server <- function(input, output, session) {
                       status = "primary",
                       selected = "all")
   })
+  
   
   
   #aatsub----
@@ -349,7 +359,7 @@ server <- function(input, output, session) {
   
   
   
-  #observe saverow----
+  #saverow, observe----
   observeEvent(input$saverow, {
     req(input$csvinput)
     req(input$row)
@@ -381,11 +391,7 @@ server <- function(input, output, session) {
     
     res <- results[input$table1_rows_selected, ]
     AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
-    # tagList(
-    #   hr(),
-    #   h3("AAT page for this term:"),
-    #   tags$iframe(src = AAT_url, height = 800, width = '100%')
-    # )
+
     tagList(
       HTML(paste0("<a href=\"", AAT_url, "\" target = _blank>AAT page for this term</a>"))
     )
@@ -394,8 +400,8 @@ server <- function(input, output, session) {
   
   
   #downloadcsv1----
-  # Downloadable csv of results
   output$downloadcsv1 <- downloadHandler(
+    #Downloadable csv of results
     filename = function() {
       paste("results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv", sep = "")
     },
@@ -416,18 +422,18 @@ server <- function(input, output, session) {
   
   
   
-  #Next button----
-  output$nextBin <- renderUI({
+  #nextButton----
+  output$nextButton <- renderUI({
     req(input$csvinput)
-    actionButton("nextBin", 
+    actionButton("nextButton", 
                  label = "Next >", 
                  class = "btn btn-primary btn-sm")
   })
   
   
   
-  #observe nextBin----
-  observeEvent(input$nextBin, {
+  #nextButton, observe----
+  observeEvent(input$nextButton, {
     
     csvinput <- read.csv(input$csvinput$datapath, header = TRUE, stringsAsFactors = FALSE)    
     seloptions <- as.list(paste0(csvinput$term, " (", csvinput$id, ")"))
@@ -443,8 +449,7 @@ server <- function(input, output, session) {
   
   
   
-  ##########################
-  #loadcsv_f ----
+  #loadcsvf ----
   output$loadcsvf <- renderUI({
     if (is.null(input$csvinputf)){
       tagList(
@@ -460,21 +465,26 @@ server <- function(input, output, session) {
   })
   
   
-  #csv_info_f----
+  #csv_infof----
   output$csv_infof <- renderUI({
     if (is.null(input$csvinputf)){
-      HTML("<div class=\"panel panel-warning\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">The csv file must be comma-separated, encoded using UTF-8, and have at least these 3 columns</h3> </div> <div class=\"panel-body\"> <ul>
+      HTML("<div class=\"panel panel-warning\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">The csv file must be comma-separated, encoded using UTF-8, and have at least these 2 columns</h3> </div> <div class=\"panel-body\"> <ul>
            <li>id</li>
            <li>term</li>
-           <li>filter</li>
-           </ul><p>The 'filter' column can be empty</p></div></div>")
+           </ul>
+          <p>Two columns are optional:
+          <ul>
+           <li>keywords</li>
+           <li>linked_aat_term</li>
+           </ul>
+           </ul><p>Separate words and phrases in <samp>keywords</samp> with pipes (<samp>|</samp>).</p></div></div>")
     }
   })
 
   
-  #downloadcsv1_f----
-  # Downloadable csv of results
+  #downloadcsv1f----
   output$downloadcsv1f <- downloadHandler(
+    #Downloadable csv of results
     filename = function() {
       paste("results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv", sep = "")
     },
@@ -486,7 +496,7 @@ server <- function(input, output, session) {
   )
   
   
-  #downloadData_f ----
+  #downloadDataf ----
   output$downloadDataf <- renderUI({
     req(input$csvinputf)
     tagList(
@@ -497,7 +507,7 @@ server <- function(input, output, session) {
   })
     
   
-  #table1_f----
+  #table1f----
   output$table1f <- DT::renderDataTable({
     req(input$csvinputf)
     
@@ -508,12 +518,45 @@ server <- function(input, output, session) {
       flog.error(paste0("Error reading CSV: ", csvinput), name = "csv")
       req(FALSE)
     }else{
-      #CSV to sqlite----
+      #CSV to sqlite
       csv_to_sqlite(csv_database, csvinput)
     }
     
+    #Open database
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    this_query <- paste0("SELECT term, filter FROM csv GROUP BY term, filter")
+    this_query <- paste0("PRAGMA table_info(csv);")
+    flog.info(paste0("this_query: ", this_query), name = "locations")
+    table_info <- dbGetQuery(csvinput_db, this_query)$name
+    
+    #Optional columns
+    if ("keywords" %in% table_info == FALSE){
+      this_query <- paste0("ALTER TABLE csv ADD COLUMN keywords TEXT;")
+      flog.info(paste0("this_query: ", this_query), name = "locations")
+      n <- dbSendQuery(csvinput_db, this_query)
+      keywords_field <- FALSE
+    }else{
+      keywords_field <- TRUE
+    }
+    
+    if ("linked_aat_term" %in% table_info == FALSE){
+      this_query <- paste0("ALTER TABLE csv ADD COLUMN linked_aat_term TEXT;")
+      flog.info(paste0("this_query: ", this_query), name = "locations")
+      n <- dbSendQuery(csvinput_db, this_query)
+      linked_field <- FALSE
+    }else{
+      linked_field <- TRUE
+    }
+    
+    if ("aat_notes" %in% table_info == FALSE){
+      this_query <- paste0("ALTER TABLE csv ADD COLUMN aat_notes TEXT;")
+      flog.info(paste0("this_query: ", this_query), name = "locations")
+      n <- dbSendQuery(csvinput_db, this_query)
+      aatnotes_field <- FALSE
+    }else{
+      aatnotes_field <- TRUE
+    }
+    
+    this_query <- paste0("SELECT term, linked_aat_term, keywords FROM csv GROUP BY term, linked_aat_term, keywords")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     all_rows <- dbGetQuery(csvinput_db, this_query)
     
@@ -528,48 +571,70 @@ server <- function(input, output, session) {
     no_cores <- detectCores() - 1
     # Initiate cluster
     cl <- makeCluster(no_cores)
-    
-    data <- all_rows
-    
+
+    #all_rows <- all_rows
+
     #Export data to cluster
-    clusterExport(cl=cl, varlist=c("data", "logfile"), envir=environment())
-    
+    clusterExport(cl=cl, varlist=c("all_rows", "logfile"), envir=environment())
+
     #Divide into steps
     step_grouping <- no_cores * 3
     steps <- ceiling(dim(all_rows)[1] / step_grouping)
-    
+
     progress_steps <- round(((0.9) / steps), 4)
     progress_val <- 0.1
     progress0$set(value = progress_val, message = "Querying AAT, please wait...")
-    
+
     results <- list()
-    
+
     #Run each batch, let the user know of the progress
     for (s in seq(1, steps)){
       to_row <- s * step_grouping
       from_row <- to_row - step_grouping
-      
+
       if (from_row == 0){
         from_row <- 1
       }
       res <- parLapply(cl, seq(from_row, to_row), find_aat)
       progress_val <- (s * progress_steps) + 0.1
-      progress0$set(value = progress_val, message = paste0("Querying AAT (", round(((s/steps) * 100), 2), "% completed)"))
+      #progress0$set(value = progress_val, message = paste0("Querying AAT (", round(((s/steps) * 100), 2), "% completed)"))
       results <- c(results, res)
     }
 
-    #stop cluster ----
+    #stop cluster
     stopCluster(cl)
     progress0$set(message = "Done! Loading results...", value = 1)
+    
+    ##Non parallel
+    # results <- list()
+    # 
+    # #Run each row, let the user know of the progress
+    # for (s in seq(1, no_rows)){
+    #   
+    #   res <- find_aat(s)
+    #   progress_val <- round(s / no_rows, 5)
+    #   print(progress_val)
+    #   #progress0$set(value = progress_val, message = paste0("Querying AAT (", round((progress_val * 100), 2), "% completed)"))
+    #   results <- c(results, res)
+    # }
+    #
+    #progress0$set(message = "Done! Loading results...", value = 1)
     
     #Save the results to the database
     for (i in 1:no_rows){
       if (!is.na(results[[i]]$aat_id)){
-        this_query <- paste0("UPDATE csv SET aat_term = '", results[[i]]$aat_term, "', aat_id = '", results[[i]]$aat_id, "' WHERE term = '", results[[i]]$term, "' AND filter = '", results[[i]]$filter, "'")
+        this_query <- paste0("UPDATE csv SET aat_term = '", results[[i]]$aat_term, "', aat_id = '", results[[i]]$aat_id, "', aat_notes = '", results[[i]]$aat_notes, "' WHERE term = '", results[[i]]$term, "' AND keywords = '", results[[i]]$keywords, "'")
         flog.info(paste0("this_query: ", this_query), name = "matches_aat")
         n <- dbSendQuery(csvinput_db, this_query)
         dbClearResult(n)
       }
+    }
+    
+    if (keywords_field == FALSE){
+      n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN keywords")
+    }
+    if (linked_field == FALSE){
+      n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN linked_aat_term")
     }
     
     #Get fresh version of table to display
@@ -579,28 +644,34 @@ server <- function(input, output, session) {
     
     dbDisconnect(csvinput_db)
     
+    results_table <- dplyr::select(resultsdf, -aat_notes)
+    
     DT::datatable(resultsdf, caption = 'Matches found in the Art & Architecture Thesaurus.', escape = FALSE, options = list(searching = TRUE, ordering = TRUE, pageLength = 15, paging = TRUE), rownames = FALSE, selection = 'single')
   })
 
   
   
   #aatresult ----
-  #Display the AAT Subject and ID of the selected row
   output$aatresult <- renderUI({
+    #Display the AAT Subject and ID of the selected row
     req(input$table1f_rows_selected)
     
     res <- resultsdf[input$table1f_rows_selected, ]
     
     if (!is.na(res$aat_id)){
       AAT_url <- stringr::str_replace(res$aat_id, "aat:", "http://vocab.getty.edu/page/aat/")
+      
+      AAT_term_notes <- aat_term_info(stringr::str_replace(res$aat_id, "aat:", ""))
+      
       tagList(
         HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
-        HTML(paste0("<p>Term: ", res$aat_term, "<br>AAT ID: <a href=\"", AAT_url, "\" target = _blank title = \"AAT page for this term\">", res$aat_id, "</a></p>")),
+        HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, "</dd><dt>AAT ID</dt><dd><a href=\"", AAT_url, "\" target = _blank title = \"AAT page for this term\">", res$aat_id, "</a></dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
         HTML("</div></div>")
       )
     }
   })
 
+  
   
   #help1 ----
   output$help1 <- renderUI({
@@ -620,7 +691,7 @@ server <- function(input, output, session) {
 #Run app----
 shinyApp(ui = ui, server = server, onStart = function() {
   cat("Loading\n")
-  #Mount path
+  #Cleanup on closing
   onStop(function() {
     cat("Closing\n")
     try(dbDisconnect(csvinput_db), silent = TRUE)
