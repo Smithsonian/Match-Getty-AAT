@@ -28,8 +28,8 @@ find_aat <- function(which_row){
     
     if (length(json$results$bindings) != 0){
       aat_id <- paste0("aat:", stringr::str_replace(json$results$bindings$subj$value, "http://vocab.getty.edu/aat/", ""))
-      scopenote <- json$results$bindings$ScopeNote$value
-      
+      scopenote <- stringr::str_replace(json$results$bindings$ScopeNote$value, "'", "''")
+
       return(list("aat_term" = this_row$linked_aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = this_row$linked_aat_term, "aat_note" = scopenote))
     }
   }
@@ -61,7 +61,7 @@ find_aat <- function(which_row){
     aat_term <- results$term
     aat_term <- stringr::str_replace(aat_term, "'", "''")
     aat_id <- paste0("aat:", stringr::str_replace(results$subject, "http://vocab.getty.edu/aat/", ""))
-    scopenote <- results$aat_note
+    scopenote <- stringr::str_replace(results$aat_note, "'", "''")
     
     return(list("aat_term" = aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = NA, "aat_note" = scopenote))
   }else{
@@ -106,8 +106,7 @@ find_aat <- function(which_row){
         aat_term <- results$term
         aat_term <- stringr::str_replace(aat_term, "'", "''")
         aat_id <- paste0("aat:", stringr::str_replace(results$subject, "http://vocab.getty.edu/aat/", ""))
-        scopenote <- results$aat_note
-        
+        scopenote <- stringr::str_replace(results$aat_note, "'", "''")
         return(list("aat_term" = aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = this_row$linked_aat_term, "aat_note" = scopenote))
       }
     }

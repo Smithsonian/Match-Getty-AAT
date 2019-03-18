@@ -547,13 +547,13 @@ server <- function(input, output, session) {
       linked_field <- TRUE
     }
     
-    if ("aat_notes" %in% table_info == FALSE){
-      this_query <- paste0("ALTER TABLE csv ADD COLUMN aat_notes TEXT;")
+    if ("aat_note" %in% table_info == FALSE){
+      this_query <- paste0("ALTER TABLE csv ADD COLUMN aat_note TEXT;")
       flog.info(paste0("this_query: ", this_query), name = "locations")
       n <- dbSendQuery(csvinput_db, this_query)
-      aatnotes_field <- FALSE
+      aatnote_field <- FALSE
     }else{
-      aatnotes_field <- TRUE
+      aatnote_field <- TRUE
     }
     
     this_query <- paste0("SELECT term, linked_aat_term, keywords FROM csv GROUP BY term, linked_aat_term, keywords")
@@ -562,7 +562,7 @@ server <- function(input, output, session) {
     
     progress_val <- 0.01
     progress0 <- shiny::Progress$new()
-    progress0$set(message = "Finding matches. Please wait...", value = progress_val)
+    progress0$set(message = "Initializing. Please wait...", value = progress_val)
     on.exit(progress0$close())
     
     no_rows <- dim(all_rows)[1]
@@ -583,7 +583,7 @@ server <- function(input, output, session) {
 
     progress_steps <- round(((0.9) / steps), 4)
     progress_val <- 0.1
-    progress0$set(value = progress_val, message = "Querying AAT, please wait...")
+    progress0$set(value = progress_val, message = "Querying AAT...")
 
     results <- list()
 
@@ -597,13 +597,13 @@ server <- function(input, output, session) {
       }
       res <- parLapply(cl, seq(from_row, to_row), find_aat)
       progress_val <- (s * progress_steps) + 0.1
-      #progress0$set(value = progress_val, message = paste0("Querying AAT (", round(((s/steps) * 100), 2), "% completed)"))
+      progress0$set(value = progress_val, message = paste0("Querying AAT (", round(((s/steps) * 100), 2), "% completed)"))
       results <- c(results, res)
     }
 
     #stop cluster
     stopCluster(cl)
-    progress0$set(message = "Done! Loading results...", value = 1)
+    progress0$set(message = "Done! Saving results...", value = 1)
     
     ##Non parallel
     # results <- list()
@@ -620,33 +620,60 @@ server <- function(input, output, session) {
     #
     #progress0$set(message = "Done! Loading results...", value = 1)
     
+    results <<- results
+    
+    dbDisconnect(csvinput_db)
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    
+    progress0$close()
+    progress1 <- shiny::Progress$new()
+    on.exit(progress1$close())
+    
     #Save the results to the database
-    for (i in 1:no_rows){
+    for (i in 1:length(results)){
+      #print(paste0("row ", i, "\n"))
       if (!is.na(results[[i]]$aat_id)){
-        this_query <- paste0("UPDATE csv SET aat_term = '", results[[i]]$aat_term, "', aat_id = '", results[[i]]$aat_id, "', aat_notes = '", results[[i]]$aat_notes, "' WHERE term = '", results[[i]]$term, "' AND keywords = '", results[[i]]$keywords, "'")
+        #print(paste0("inserting row ", i, "\n"))
+        this_query <- paste0("UPDATE csv SET aat_term = '", results[[i]]$aat_term, "', aat_id = '", results[[i]]$aat_id, "', aat_note = '", results[[i]]$aat_note, "' WHERE term = '", results[[i]]$term, "' AND keywords = '", results[[i]]$keywords, "' AND linked_aat_term = '", results[[i]]$linked_aat_term,"'")
         flog.info(paste0("this_query: ", this_query), name = "matches_aat")
         n <- dbSendQuery(csvinput_db, this_query)
+        #db_commit(csvinput_db)
         dbClearResult(n)
       }
+      progress1$set(message = "Saving results...", value = round(i/no_rows, 5))
     }
     
-    if (keywords_field == FALSE){
-      n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN keywords")
-    }
-    if (linked_field == FALSE){
-      n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN linked_aat_term")
-    }
+    progress1$set(message = "Done!", value = 1)
+    #Drop unusued columns,
+    # need to rewrite since sqlite doesn't work like this. 
+    # Need to create a table copy without the cols, drop table, then rename
+    # if (keywords_field == FALSE){
+    #   n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN keywords")
+    # }
+    # if (linked_field == FALSE){
+    #   n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN linked_aat_term")
+    # }
+    # if (aatnote_field == FALSE){
+    #   n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN aatnote_field")
+    # }
     
     #Get fresh version of table to display
     this_query <- paste0("SELECT * FROM csv")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     resultsdf <<- dbGetQuery(csvinput_db, this_query)
     
+    total_rows <- dim(resultsdf)[1]
+    
+    #How many matches?
+    this_query <- paste0("SELECT COUNT(*) as no_matches FROM csv WHERE aat_id IS NOT NULL")
+    flog.info(paste0("this_query: ", this_query), name = "locations")
+    no_matches <- dbGetQuery(csvinput_db, this_query)$no_matches
+    
     dbDisconnect(csvinput_db)
     
-    results_table <- dplyr::select(resultsdf, -aat_notes)
+    #results_table <- dplyr::select(resultsdf, -aat_note)
     
-    DT::datatable(resultsdf, caption = 'Matches found in the Art & Architecture Thesaurus.', escape = FALSE, options = list(searching = TRUE, ordering = TRUE, pageLength = 15, paging = TRUE), rownames = FALSE, selection = 'single')
+    DT::datatable(resultsdf, caption = paste0('Found ', no_matches, ' matches (of ', total_rows, ', ', round(no_matches/total_rows, 2), '%) in the Art & Architecture Thesaurus'), escape = FALSE, options = list(searching = TRUE, ordering = TRUE, pageLength = 15, paging = TRUE), rownames = FALSE, selection = 'single')
   })
 
   
