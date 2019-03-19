@@ -9,13 +9,14 @@ library(RSQLite)
 library(shinyWidgets)
 library(shinycssloaders)
 library(parallel)
-
+library(WriteXLS)
 
 #Settings----
 app_name <- "Match Getty AAT"
 app_ver <- "0.3.0"
 github_link <- "https://github.com/Smithsonian/Match-Getty-AAT"
-csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
+csv_database <- paste0("data/csv1_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
+csv_database2 <- paste0("data/csv2_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
 options(stringsAsFactors = FALSE)
 options(encoding = 'UTF-8')
 #Logfile
@@ -33,18 +34,18 @@ ui <- fluidPage(
   tabsetPanel(type = "tabs",
       tabPanel("Batch Matching of Subjects",
          fluidRow(
-           column(width = 4, 
+           column(width = 8, 
                   br(),
                   uiOutput("loadcsvf"),
-                  uiOutput("downloadDataf")
+                  withSpinner(DT::dataTableOutput("table1f"))
            ),
-           column(width = 8,
+           column(width = 4,
                   br(),
+                  uiOutput("downloadDataf"),
+                  hr(),
                   withSpinner(uiOutput("aatresult"))
            )
-         ),
-         hr(),
-         withSpinner(DT::dataTableOutput("table1f"))
+         )
       ),
       tabPanel("Select Subject - Full Text Search",
         fluidRow(
@@ -412,14 +413,32 @@ server <- function(input, output, session) {
     }
   )
   
+  #downloadcsv2----
+  output$downloadcsv2 <- downloadHandler(
+    filename = function(){paste0("results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")},
+    
+    content = function(file){
+      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+      data <- dbGetQuery(csvinput_db, "SELECT * FROM csv")
+      WriteXLS(data, file, AdjWidth = TRUE, BoldHeaderRow = TRUE)
+      dbDisconnect(csvinput_db)
+    },
+    contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  )
   
   
   #downloadData ----
   output$downloadData <- renderUI({
     req(input$csvinput)
-    downloadButton("downloadcsv1", "Download results", class = "btn-primary btn-sm")  
+    tagList(
+      HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Download Results</h3> </div> <div class=\"panel-body\">"),
+      HTML("<div class=\"btn-toolbar\">"),
+      downloadButton("downloadcsv1", "CSV", class = "btn-success"),
+      #HTML("</p><p>"),
+      downloadButton("downloadcsv2", "Excel", class = "btn-primary"),
+      HTML("</div></div></div>")
+    )
   })
-  
   
   
   #nextButton----
@@ -429,7 +448,6 @@ server <- function(input, output, session) {
                  label = "Next >", 
                  class = "btn btn-primary btn-sm")
   })
-  
   
   
   #nextButton, observe----
@@ -446,7 +464,6 @@ server <- function(input, output, session) {
     }
     output$insert_msg <- renderUI({HTML("")})
   })
-  
   
   
   #loadcsvf ----
@@ -489,10 +506,25 @@ server <- function(input, output, session) {
       paste("results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv", sep = "")
     },
     content = function(file) {
-      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
       write.csv(dbGetQuery(csvinput_db, "SELECT * FROM csv"), file, row.names = FALSE)
       dbDisconnect(csvinput_db)
     }
+  )
+  
+  
+  #downloadcsv2f----
+  output$downloadcsv2f <- downloadHandler(
+    filename = function(){paste0("data/results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")},
+    
+    content = function(file){
+      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
+      data <- dbGetQuery(csvinput_db, "SELECT * FROM csv")
+      WriteXLS(data, file, AdjWidth = TRUE, BoldHeaderRow = TRUE)
+      dbDisconnect(csvinput_db)
+    },
+    
+    contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   )
   
   
@@ -501,11 +533,14 @@ server <- function(input, output, session) {
     req(input$csvinputf)
     tagList(
       HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Download Results</h3> </div> <div class=\"panel-body\">"),
-      downloadButton("downloadcsv1f", "Download full table as CSV", class = "btn-primary")  ,
-      HTML("</div></div>")
+      HTML("<div class=\"btn-toolbar\">"),
+      downloadButton("downloadcsv1f", "CSV", class = "btn-success"),
+      #HTML("</p><p>"),
+      downloadButton("downloadcsv2f", "Excel", class = "btn-primary"),
+      HTML("</div></div></div>")
     )
   })
-    
+  
   
   #table1f----
   output$table1f <- DT::renderDataTable({
@@ -519,11 +554,11 @@ server <- function(input, output, session) {
       req(FALSE)
     }else{
       #CSV to sqlite
-      csv_to_sqlite(csv_database, csvinput)
+      csv_to_sqlite(csv_database2, csvinput)
     }
     
     #Open database
-    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
     this_query <- paste0("PRAGMA table_info(csv);")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     table_info <- dbGetQuery(csvinput_db, this_query)$name
@@ -578,7 +613,7 @@ server <- function(input, output, session) {
     clusterExport(cl=cl, varlist=c("all_rows", "logfile"), envir=environment())
 
     #Divide into steps
-    step_grouping <- no_cores * 3
+    step_grouping <- no_cores * 2
     steps <- ceiling(dim(all_rows)[1] / step_grouping)
 
     progress_steps <- round(((0.9) / steps), 4)
@@ -623,7 +658,7 @@ server <- function(input, output, session) {
     results <<- results
     
     dbDisconnect(csvinput_db)
-    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
     
     progress0$close()
     progress1 <- shiny::Progress$new()
@@ -671,9 +706,9 @@ server <- function(input, output, session) {
     
     dbDisconnect(csvinput_db)
     
-    #results_table <- dplyr::select(resultsdf, -aat_note)
+    results_table <- dplyr::select(resultsdf, -aat_note)
     
-    DT::datatable(resultsdf, caption = paste0('Found ', no_matches, ' matches (of ', total_rows, ', ', round(no_matches/total_rows, 2), '%) in the Art & Architecture Thesaurus'), escape = FALSE, options = list(searching = TRUE, ordering = TRUE, pageLength = 15, paging = TRUE), rownames = FALSE, selection = 'single')
+    DT::datatable(results_table, caption = paste0('Found ', no_matches, ' matches (of ', total_rows, ', ', round((no_matches/total_rows) * 100, 2), '%) in the Art & Architecture Thesaurus'), escape = FALSE, options = list(searching = TRUE, ordering = TRUE, pageLength = 10, paging = TRUE), rownames = FALSE, selection = 'single')
   })
 
   
@@ -688,11 +723,20 @@ server <- function(input, output, session) {
     if (!is.na(res$aat_id)){
       AAT_url <- stringr::str_replace(res$aat_id, "aat:", "http://vocab.getty.edu/page/aat/")
       
-      AAT_term_notes <- aat_term_info(stringr::str_replace(res$aat_id, "aat:", ""))
+      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
+      
+      this_query <- paste0("SELECT aat_note FROM csv WHERE aat_id = '", res$aat_id, "' LIMIT 1")
+      flog.info(paste0("this_query: ", this_query), name = "locations")
+      note <- dbGetQuery(csvinput_db, this_query)
+      
+      dbDisconnect(csvinput_db)
+      
+      AAT_term_notes <- note$aat_note
+      #AAT_term_notes <- aat_term_info(stringr::str_replace(res$aat_id, "aat:", ""))
       
       tagList(
         HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
-        HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, "</dd><dt>AAT ID</dt><dd><a href=\"", AAT_url, "\" target = _blank title = \"AAT page for this term\">", res$aat_id, "</a></dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
+        HTML(paste0("<dl><dt>Term</dt><dd>", res$aat_term, "</dd><dt>AAT ID</dt><dd><a href=\"", AAT_url, "\" target = _blank title = \"AAT page for this term\">", res$aat_id, "</a></dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
         HTML("</div></div>")
       )
     }
@@ -723,5 +767,6 @@ shinyApp(ui = ui, server = server, onStart = function() {
     cat("Closing\n")
     try(dbDisconnect(csvinput_db), silent = TRUE)
     try(unlink(csv_database), silent = TRUE)
+    try(unlink(csv_database2), silent = TRUE)
   })
 })
