@@ -10,13 +10,14 @@ library(shinyWidgets)
 library(shinycssloaders)
 library(parallel)
 library(WriteXLS)
+library(openxlsx)
+
 
 #Settings----
 app_name <- "Match Getty AAT"
-app_ver <- "0.3.0"
+app_ver <- "0.4.0"
 github_link <- "https://github.com/Smithsonian/Match-Getty-AAT"
-csv_database <- paste0("data/csv1_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
-csv_database2 <- paste0("data/csv2_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
+csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
 options(stringsAsFactors = FALSE)
 options(encoding = 'UTF-8')
 #Logfile
@@ -30,96 +31,99 @@ ui <- fluidPage(
   
   # App title
   titlePanel(app_name),
-
   tabsetPanel(type = "tabs",
-      tabPanel("Batch Matching of Subjects",
+      tabPanel("1 - Batch Matching of Subjects",
+         br(),
+         fluidRow(
+           column(width = 4, 
+                  uiOutput("main")
+           ),
+           column(width = 4, 
+                  uiOutput("inputfile")
+           ),
+           column(width = 4, 
+                  uiOutput("loadcsv"),
+                  uiOutput("error_msg")
+           )
+         ),
          fluidRow(
            column(width = 8, 
-                  br(),
-                  uiOutput("loadcsvf"),
                   withSpinner(DT::dataTableOutput("table1f"))
            ),
            column(width = 4,
-                  br(),
-                  uiOutput("downloadDataf"),
-                  hr(),
                   withSpinner(uiOutput("aatresult"))
            )
          )
       ),
-      tabPanel("Select Subject - Full Text Search",
-        fluidRow(
+      tabPanel("2 - Manual Matching of Subjects",
+         br(),
+         fluidRow(
             column(width = 4, 
                    br(),
-                   uiOutput("loadcsv"),
-                   fluidRow(
-                     column(width = 9, 
-                            uiOutput("choose_string")
-                     ),
-                     column(width = 3, 
-                            br(),
-                            uiOutput("nextButton")
-                    )
-                  )
+                   uiOutput("step1_msg"),
+                   uiOutput("choose_string")
             ),
             column(width = 8,
                    uiOutput("topcategories")
             )
           ),
-          hr(),
           fluidRow(
             column(width = 8,
                    DT::dataTableOutput("table1")
             ),
             column(width = 4,
-                   uiOutput("table2"),
-                   uiOutput("downloadData")
+                   uiOutput("table2")
               )
           )
       ),
-      #Help tab
-      tabPanel("Help", 
+      tabPanel("3 - Download Results",
+         br(),
+         fluidRow(
+             column(width = 4, 
+                    br(),
+                    uiOutput("step1_msg2"),
+                    uiOutput("downloadData"),
+                    br(),
+                    br()
+            )
+           )
+      ),
+      #Help----
+      tabPanel("Help/About", 
            br(),
            fluidRow(
-             column(width = 6,
-                    HTML("<p>This app will take the string in the column
+             column(width = 4,
+                    shinyWidgets::panel(
+                      HTML("<p>This app will take the string in the column
                           \"term\" and match it with the The Art & Architecture
                           Thesaurus using their Linked Open Data portal.</p>
-                        <p>Matching methods:</p>
-                         <ul>
-                           <li>Batch Matching of Subjects: Automated match 
-                              based on the term and keywords.</li>
-                           <li>Select Subject - Full Text Search: Select the 
-                              appropiate match by searching in term names, 
-                              notes, and other fields.</li>
-                         </ul>")
+                          <p>Steps:</p>
+                           <ol>
+                             <li>Batch Matching of Subjects: Automated match 
+                                based on the term and keywords.</li>
+                             <li>Manual Matching of Subjects: Select the 
+                                appropiate match by executing a full text search.</li>
+                              <li>Download Results: Download a file with the rows from 
+                                the input file with the match from the AAT.</li>
+                           </ol>"),
+                      heading = "Help",
+                      status = "primary"
+                    )
+             ),
+             column(width = 4,
+                    shinyWidgets::panel(
+                      HTML("<p>This app was made by the Digitization Program Office, OCIO.</p><p>The AAT is queried using their Linked Open Data SPARQL endpoint: <a href=\"http://vocab.getty.edu/queries\">http://vocab.getty.edu/queries</a></p>"),
+                      heading = "About",
+                      status = "primary"
+                    )
              )
            ),
-           fluidRow(
-             column(width = 6,
-                    HTML("<div class=\"panel panel-primary\"> 
-                            <div class=\"panel-heading\"> 
-                              <h3 class=\"panel-title\">Batch Matching of Subjects</h3>
-                            </div>
-                            <div class=\"panel-body\">
-                               Coming soon...
-                            </div></div>")
-             ),
-             column(width = 6,
-                    HTML("<div class=\"panel panel-primary\"> 
-                            <div class=\"panel-heading\"> 
-                              <h3 class=\"panel-title\">Select Subject - Full Text Search</h3>
-                            </div>
-                            <div class=\"panel-body\">
-                               Coming soon...
-                            </div></div>")
-             )
-           )
+          HTML("<br><br><br><br><br><br><br><br>")
       )
   ),
   hr(),
   #footer
-  HTML(paste0("<p><a href=\"http://dpo.si.edu\" target = _blank><img src=\"dpologo.jpg\"></a> | ", app_name, " ver. ", app_ver, " | <a href=\"", github_link, "\" target = _blank>Source code</a></p>"))
+  HTML(paste0("<p><a href=\"http://dpo.si.edu\" target = _blank><img src=\"dpologo.jpg\"></a> | ", app_name, ", ver. ", app_ver, " | <a href=\"", github_link, "\" target = _blank>Source code</a></p>"))
 )
 
 
@@ -132,43 +136,86 @@ server <- function(input, output, session) {
   flog.logger("getty", INFO, appender=appender.file(logfile))
   
   
+  #main----
+  output$main <- renderUI({
+    shinyWidgets::panel(
+      p("Match Getty AAT is a prototype system that matches terms in a file to the ", tags$strong("Getty Art & Architecture Thesaurus"), "using their Linked Open Data portal."),
+      p("The app tries to find the best match by using a set of keywords included with each row, when available, to try to disambiguate the usage. For terms where many matches are found, the app allows the user to select the best one. Once the process is completed, the results file can be downloaded for further processing or importing to the CIS or other database."),
+      heading = "Welcome",
+      status = "primary"
+    )
+  })
+  
+  
+  #inputfile----
+  output$inputfile <- renderUI({
+    shinyWidgets::panel(
+      uiOutput("csv_info"),
+      heading = "Input File",
+      status = "success"
+    )
+  })
+  
+  
   #loadcsv ----
   output$loadcsv <- renderUI({
     if (is.null(input$csvinput)){
       tagList(
-        p("Upload a csv file to match to AAT terms using a full text search."),
-        fileInput("csvinput", "Select csv File",
-                  multiple = FALSE,
-                  accept = c("text/csv",
-                             "text/comma-separated-values,text/plain",
-                             ".csv")),
-        uiOutput("csv_info")
+        fileInput("csvinput", "Upload an Input File",
+            multiple = FALSE,
+            accept = c("text/csv",
+                       "text/comma-separated-values,text/plain",
+                       ".csv",
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       ".xlsx"), 
+            width = "580px")#,
+        #uiOutput("csv_info")
       )
     }
   })
   
   
+  #csv_info----
+  output$csv_info <- renderUI({
+    if (is.null(input$csvinput)){
+      HTML("<p>To use this app, upload a CSV or Excel file.
+          <ul>
+            <li>If the input file is a CSV file (.csv), the file must be comma-separated</li>
+            <li>If the input file is an Excel file (.xlsx), only the first sheet is used</li>
+          </ul>
+          <p>The input file must be encoded using UTF-8 and have at least these 2 columns:</p>
+          <ul>
+             <li><samp>id</samp> - unique ID for the row</li>
+             <li><samp>term</samp> - term to match to the AAT</li>
+          </ul>
+          <p>Two columns are optional:</p>
+          <ul>
+             <li><samp>keywords</samp> - words or phrases (separated by pipes: <samp>|</samp>) to filter possible term matches</li>
+             <li><samp>linked_aat_term</samp> - AAT term from previous efforts</li>
+          </ul>
+          <p>Any other columns in the input file will be ignored but returned in the results file.</p>")
+    }
+  })
+  
   
   #choose_string----
   output$choose_string <- renderUI({
+    output$step1_msg <- renderUI({
+      HTML("<br>
+          <div class=\"alert alert-info\" role=\"alert\">Upload a file in Step 1 to run the matching system.</div>
+          <br><br><br><br><br><br><br><br><br><br><br><br>")
+    })
+
     req(input$csvinput)
     
-    csvinput <- read.csv(input$csvinput$datapath, header = TRUE, stringsAsFactors = FALSE)    
+    output$step1_msg <- renderUI({HTML("&nbsp;")})
     
-    # Process any error messages
-    if (class(csvinput) == "try-error"){
-        flog.error(paste0("Error reading CSV: ", csvinput), name = "csv")
-      }else{
-        #CSV to sqlite
-        csv_to_sqlite(csv_database, csvinput)
-      }
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    csvinput1 <- dbGetQuery(csvinput_db, "SELECT term, id from csv WHERE aat_id IS NULL")
+    dbDisconnect(csvinput_db)
     
-    flog.info(paste0("term: ", csvinput$term), name = "getty")
-    flog.info(paste0("id: ", csvinput$id), name = "getty")
-    
-    selectInput("row", "Select row to find a match in the AAT:", as.list(paste0(csvinput$term, " (", csvinput$id, ")")), width = "100%", multiple = FALSE, selectize = FALSE)
+    selectInput("row", "Select row to find a match in the AAT:", as.list(paste0(csvinput1$term, " (", csvinput1$id, ")")), width = "100%", multiple = FALSE, selectize = FALSE)
   })
-  
   
   
   #aattop----
@@ -193,7 +240,6 @@ server <- function(input, output, session) {
                       status = "primary",
                       selected = "all")
   })
-  
   
   
   #aatsub----
@@ -231,7 +277,6 @@ server <- function(input, output, session) {
   })
   
   
-  
   #topcategories----
   output$topcategories <- renderUI({
     req(input$csvinput)
@@ -244,7 +289,6 @@ server <- function(input, output, session) {
       HTML("</div></div>")
     )
   })
-  
   
   
   #table1----
@@ -321,21 +365,18 @@ server <- function(input, output, session) {
       results_table <- dplyr::select(results, -1)
     }
     
-    DT::datatable(results_table, escape = FALSE, options = list(searching = TRUE, ordering = TRUE, pageLength = 15, paging = TRUE, language = list(zeroRecords = "No matches found")), rownames = FALSE, selection = 'single', caption = "Subject") %>% formatStyle("parents", "white-space" = "nowrap") %>% formatStyle("term", "white-space" = "nowrap")
+    DT::datatable(results_table, 
+                  escape = FALSE, 
+                  options = list(searching = TRUE, 
+                                 ordering = TRUE, 
+                                 pageLength = 15, 
+                                 paging = TRUE, 
+                                 language = list(zeroRecords = "No matches found")
+                                 ), 
+                  rownames = FALSE, 
+                  selection = 'single', 
+                  caption = "Select a subject to match") %>% formatStyle("parents", "white-space" = "nowrap") %>% formatStyle("term", "white-space" = "nowrap")
   })
-  
-  
-  
-  #csv_info----
-  output$csv_info <- renderUI({
-    if (is.null(input$csvinput)){
-      HTML("<div class=\"panel panel-warning\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">The csv file must be comma-separated, encoded using UTF-8, and have at least these 2 columns</h3> </div> <div class=\"panel-body\"> <ul>
-           <li>id</li>
-           <li>term</li>
-           </ul></div></div>")
-      }
-    })
-  
   
   
   #table2 ----
@@ -348,18 +389,55 @@ server <- function(input, output, session) {
     
     AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
     
+    this_row_id <- base::strsplit(input$row, " [(]")[[1]]
+    this_row_id <- this_row_id[length(this_row_id)]
+    this_row_id <- base::strsplit(this_row_id, "[)]")[[1]][1]
+    
+    this_row_term <- base::strsplit(input$row, " [(]")[[1]]
+    this_row_term <- this_row_term[1]
+    
+    output$insert_msg <- renderUI({HTML("&nbsp;")})
+    
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    row_count <- dbGetQuery(csvinput_db, paste0("SELECT count(*) AS no_rows FROM csv WHERE aat_id IS NULL AND term = '", this_row_term, "'"))
+    dbDisconnect(csvinput_db)
+    
     tagList(
       HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
-      HTML(paste0("<p>Term: ", res$term, "<br>AAT ID: <a href=\"", AAT_url, "\" target = _blank title = \"AAT page for this term\">", res$id, "</a></p>")),
+      HTML(paste0("<dl class=\"dl-horizontal\"><dt>Object ID</dt><dd>", this_row_id, "</dd><dt>Term</dt><dd>", res$term, "</dd><dt>AAT ID</dt><dd>", res$id)),
+      actionLink("showaat", "[AAT page for this term]"),
+      HTML("</dd></dl></p>"),
       # Save button
-      actionButton("saverow", "Save this term", class = "btn btn-primary", icon = icon("ok", lib = "glyphicon")),
+      actionButton("saverow", paste0("Save this AAT term for item ID ", this_row_id), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon")),
+      br(),
+      br(),
+      if (row_count$no_rows > 1){actionButton("saverowall", paste0("Save this AAT term for the ", row_count$no_rows, " rows with term '", this_row_term, "'"), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon"))},
       uiOutput("insert_msg"),
       HTML("</div></div>")
     )
   })
   
   
+  #showaat----
+  observeEvent(input$showaat, {
+    req(input$csvinput)
+    req(input$row)
+    req(input$table1_rows_selected)
+    
+    res <- results[input$table1_rows_selected, ]
+    
+    AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
+    
+    showModal(modalDialog(
+      title = "AAT Term Info",
+      tags$iframe(src=AAT_url, height=650, width=860),
+      easyClose = TRUE,
+      footer = modalButton("Close", icon = icon("close")),
+      size = "l")
+    )
+  })
   
+ 
   #saverow, observe----
   observeEvent(input$saverow, {
     req(input$csvinput)
@@ -373,7 +451,7 @@ server <- function(input, output, session) {
     selected_row <- results[input$table1_rows_selected, ]
     
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    query <- paste0("UPDATE csv SET aat_id = 'aat:", selected_row[1], "', aat_term = '", selected_row[2], "' WHERE id = '", this_row_id, "'")
+    query <- paste0("UPDATE csv SET aat_id = 'aat:", selected_row[1], "', aat_term = '", selected_row[2], "', aat_note = '", selected_row[3], "' WHERE id = '", this_row_id, "'")
     flog.info(paste0("update query: ", query), name = "getty")
     n <- dbExecute(csvinput_db, query)
     dbDisconnect(csvinput_db)
@@ -383,21 +461,26 @@ server <- function(input, output, session) {
   })
   
   
-  
-  #aat_display ----
-  output$aat_display <- renderUI({
+  #saverowall, observe----
+  observeEvent(input$saverowall, {
     req(input$csvinput)
     req(input$row)
     req(input$table1_rows_selected)
     
-    res <- results[input$table1_rows_selected, ]
-    AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
-
-    tagList(
-      HTML(paste0("<a href=\"", AAT_url, "\" target = _blank>AAT page for this term</a>"))
-    )
+    this_row_term <- base::strsplit(input$row, " [(]")[[1]]
+    this_row_term <- this_row_term[1]
+    
+    selected_row <- results[input$table1_rows_selected, ]
+    
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    query <- paste0("UPDATE csv SET aat_id = 'aat:", selected_row[1], "', aat_term = '", selected_row[2], "', aat_note = '", selected_row[3], "' WHERE term = '", this_row_term, "' AND aat_id IS NULL")
+    flog.info(paste0("update query: ", query), name = "getty")
+    n <- dbExecute(csvinput_db, query)
+    dbDisconnect(csvinput_db)
+    output$insert_msg <- renderUI({
+      HTML("<br><div class=\"alert alert-success\" role=\"alert\">Term saved</div>")
+    })
   })
-  
   
   
   #downloadcsv1----
@@ -408,10 +491,22 @@ server <- function(input, output, session) {
     },
     content = function(file) {
       csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-      write.csv(dbGetQuery(csvinput_db, "SELECT * FROM csv"), file, row.names = FALSE)
+      data <- dbGetQuery(csvinput_db, "SELECT * FROM csv")
       dbDisconnect(csvinput_db)
+      
+      #Drop unused columns
+      if (keywords_field == FALSE){
+        data <- dplyr::select(data, -keywords)
+      }
+      
+      if (linked_field == FALSE){
+        data <- dplyr::select(data, -linked_aat_term)
+      }
+      
+      write.csv(data, file, row.names = FALSE)
     }
   )
+  
   
   #downloadcsv2----
   output$downloadcsv2 <- downloadHandler(
@@ -420,8 +515,18 @@ server <- function(input, output, session) {
     content = function(file){
       csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
       data <- dbGetQuery(csvinput_db, "SELECT * FROM csv")
-      WriteXLS(data, file, AdjWidth = TRUE, BoldHeaderRow = TRUE)
       dbDisconnect(csvinput_db)
+      
+      #Drop unused columns
+      if (keywords_field == FALSE){
+        data <- dplyr::select(data, -keywords)
+      }
+      
+      if (linked_field == FALSE){
+        data <- dplyr::select(data, -linked_aat_term)
+      }
+      
+      WriteXLS::WriteXLS(x = data, ExcelFileName = file, AdjWidth = TRUE, BoldHeaderRow = TRUE, Encoding = "UTF-8", row.names = FALSE, FreezeRow = 1, SheetNames = c("results_aat"))
     },
     contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   )
@@ -429,136 +534,79 @@ server <- function(input, output, session) {
   
   #downloadData ----
   output$downloadData <- renderUI({
+    output$step1_msg2 <- renderUI({
+      HTML("<br><div class=\"alert alert-info\" role=\"alert\">Upload a file in Step 1 to run the matching system.</div><br><br><br><br><br><br><br><br><br><br><br><br>")
+    })
+    
     req(input$csvinput)
-    tagList(
-      HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Download Results</h3> </div> <div class=\"panel-body\">"),
+    
+    output$step1_msg2 <- renderUI({HTML("&nbsp;")})
+    
+    shinyWidgets::panel(
+      HTML("<p>Download the results as a Comma Separated Values file (.csv) or an Excel file (.xlsx).</p><p>The results file contains the same columns as the input file, untouched, with three additional columns:</p>"),
+      HTML("<ul><li>aat_id</li><li>aat_term</li><li>aat_note</li></ul>"),
+      br(),
       HTML("<div class=\"btn-toolbar\">"),
-      downloadButton("downloadcsv1", "CSV", class = "btn-success"),
-      #HTML("</p><p>"),
-      downloadButton("downloadcsv2", "Excel", class = "btn-primary"),
-      HTML("</div></div></div>")
-    )
-  })
-  
-  
-  #nextButton----
-  output$nextButton <- renderUI({
-    req(input$csvinput)
-    actionButton("nextButton", 
-                 label = "Next >", 
-                 class = "btn btn-primary btn-sm")
-  })
-  
-  
-  #nextButton, observe----
-  observeEvent(input$nextButton, {
-    
-    csvinput <- read.csv(input$csvinput$datapath, header = TRUE, stringsAsFactors = FALSE)    
-    seloptions <- as.list(paste0(csvinput$term, " (", csvinput$id, ")"))
-    
-    current <- which(seloptions == input$row)
-    if(current < length(seloptions)){
-      updateSelectInput(session, "row",
-                        choices = as.list(seloptions),
-                        selected = seloptions[current + 1])
-    }
-    output$insert_msg <- renderUI({HTML("")})
-  })
-  
-  
-  #loadcsvf ----
-  output$loadcsvf <- renderUI({
-    if (is.null(input$csvinputf)){
-      tagList(
-        p("Upload a csv file to match to AAT terms using keywords to limit the results."),
-        fileInput("csvinputf", "Select csv File",
-                  multiple = FALSE,
-                  accept = c("text/csv",
-                             "text/comma-separated-values,text/plain",
-                             ".csv")),
-        uiOutput("csv_infof")
-      )
-    }
-  })
-  
-  
-  #csv_infof----
-  output$csv_infof <- renderUI({
-    if (is.null(input$csvinputf)){
-      HTML("<div class=\"panel panel-warning\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">The csv file must be comma-separated, encoded using UTF-8, and have at least these 2 columns</h3> </div> <div class=\"panel-body\"> <ul>
-           <li>id</li>
-           <li>term</li>
-           </ul>
-          <p>Two columns are optional:
-          <ul>
-           <li>keywords</li>
-           <li>linked_aat_term</li>
-           </ul>
-           </ul><p>Separate words and phrases in <samp>keywords</samp> with pipes (<samp>|</samp>).</p></div></div>")
-    }
-  })
-
-  
-  #downloadcsv1f----
-  output$downloadcsv1f <- downloadHandler(
-    #Downloadable csv of results
-    filename = function() {
-      paste("results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv", sep = "")
-    },
-    content = function(file) {
-      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
-      write.csv(dbGetQuery(csvinput_db, "SELECT * FROM csv"), file, row.names = FALSE)
-      dbDisconnect(csvinput_db)
-    }
-  )
-  
-  
-  #downloadcsv2f----
-  output$downloadcsv2f <- downloadHandler(
-    filename = function(){paste0("data/results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")},
-    
-    content = function(file){
-      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
-      data <- dbGetQuery(csvinput_db, "SELECT * FROM csv")
-      WriteXLS(data, file, AdjWidth = TRUE, BoldHeaderRow = TRUE)
-      dbDisconnect(csvinput_db)
-    },
-    
-    contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  )
-  
-  
-  #downloadDataf ----
-  output$downloadDataf <- renderUI({
-    req(input$csvinputf)
-    tagList(
-      HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Download Results</h3> </div> <div class=\"panel-body\">"),
-      HTML("<div class=\"btn-toolbar\">"),
-      downloadButton("downloadcsv1f", "CSV", class = "btn-success"),
-      #HTML("</p><p>"),
-      downloadButton("downloadcsv2f", "Excel", class = "btn-primary"),
-      HTML("</div></div></div>")
+      downloadButton("downloadcsv1", "CSV (.csv)", class = "btn-success"),
+      downloadButton("downloadcsv2", "Excel (.xlsx)", class = "btn-primary"),
+      HTML("</div>"),
+      heading = "Download Results",
+      status = "primary"
     )
   })
   
   
   #table1f----
   output$table1f <- DT::renderDataTable({
-    req(input$csvinputf)
+    req(input$csvinput)
     
-    csvinput <- read.csv(input$csvinputf$datapath, header = TRUE, stringsAsFactors = FALSE)
+    #Read Upload----
+    filename_to_check <- input$csvinput$name
+    ext_to_check <- stringr::str_split(filename_to_check, '[.]')[[1]]
+    ext_to_check <- ext_to_check[length(ext_to_check)]
     
-    # Process any error messages
-    if (class(csvinput) == "try-error"){
-      flog.error(paste0("Error reading CSV: ", csvinput), name = "csv")
-      req(FALSE)
+    if (ext_to_check == "csv"){
+      #Read CSV file----
+      csvinput <- read.csv(input$csvinput$datapath, header = TRUE, stringsAsFactors = FALSE)
+      
+      # Process any error messages
+      if (class(csvinput) == "try-error"){
+        flog.error(paste0("Error reading CSV: ", filename_to_check), name = "csv")
+        output$error_msg <- renderUI({
+          HTML(paste0("<br><div class=\"alert alert-danger\" role=\"alert\">File ", filename_to_check, " does not appear to be a valid file. Please reload the application and try again.</div>"))
+        })
+        req(FALSE)
+      }else{
+        #Data to sqlite
+        csv_to_sqlite(csv_database, csvinput)
+      }
+    }else if (ext_to_check == "xlsx"){
+      #Read XLSX file----
+      try(csvinput <- openxlsx::read.xlsx(input$csvinput$datapath, sheet = 1, check.names = TRUE), silent = TRUE)
+      
+      if (exists("csvinput") == FALSE){
+        flog.error(paste0("Error reading Excel: ", filename_to_check), name = "xlsx")
+        output$error_msg <- renderUI({
+          HTML(paste0("<br><div class=\"alert alert-danger\" role=\"alert\">File ", filename_to_check, " does not appear to be a valid file. Please reload the application and try again.</div>"))
+        })
+        req(FALSE)
+      }else{
+        #Data to sqlite
+        csv_to_sqlite(csv_database, csvinput)
+      }
     }else{
-      #CSV to sqlite
-      csv_to_sqlite(csv_database2, csvinput)
+      flog.error(paste0("Error reading file: ", filename_to_check), name = "csv")
+      output$error_msg <- renderUI({
+        HTML("<br><div class=\"alert alert-danger\" role=\"alert\">File must be a valid and have the extension csv or xlsx. Please reload the application and try again.</div>")
+      })
+      req(FALSE)
     }
     
+    #No errors
+    output$error_msg <- renderUI({HTML("&nbsp;")})
+    
     #Open database
-    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
     this_query <- paste0("PRAGMA table_info(csv);")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     table_info <- dbGetQuery(csvinput_db, this_query)$name
@@ -568,27 +616,18 @@ server <- function(input, output, session) {
       this_query <- paste0("ALTER TABLE csv ADD COLUMN keywords TEXT;")
       flog.info(paste0("this_query: ", this_query), name = "locations")
       n <- dbSendQuery(csvinput_db, this_query)
-      keywords_field <- FALSE
+      keywords_field <<- FALSE
     }else{
-      keywords_field <- TRUE
+      keywords_field <<- TRUE
     }
     
     if ("linked_aat_term" %in% table_info == FALSE){
       this_query <- paste0("ALTER TABLE csv ADD COLUMN linked_aat_term TEXT;")
       flog.info(paste0("this_query: ", this_query), name = "locations")
       n <- dbSendQuery(csvinput_db, this_query)
-      linked_field <- FALSE
+      linked_field <<- FALSE
     }else{
-      linked_field <- TRUE
-    }
-    
-    if ("aat_note" %in% table_info == FALSE){
-      this_query <- paste0("ALTER TABLE csv ADD COLUMN aat_note TEXT;")
-      flog.info(paste0("this_query: ", this_query), name = "locations")
-      n <- dbSendQuery(csvinput_db, this_query)
-      aatnote_field <- FALSE
-    }else{
-      aatnote_field <- TRUE
+      linked_field <<- TRUE
     }
     
     this_query <- paste0("SELECT term, linked_aat_term, keywords FROM csv GROUP BY term, linked_aat_term, keywords")
@@ -606,8 +645,6 @@ server <- function(input, output, session) {
     no_cores <- detectCores() - 1
     # Initiate cluster
     cl <- makeCluster(no_cores)
-
-    #all_rows <- all_rows
 
     #Export data to cluster
     clusterExport(cl=cl, varlist=c("all_rows", "logfile"), envir=environment())
@@ -630,6 +667,7 @@ server <- function(input, output, session) {
       if (from_row == 0){
         from_row <- 1
       }
+      
       res <- parLapply(cl, seq(from_row, to_row), find_aat)
       progress_val <- (s * progress_steps) + 0.1
       progress0$set(value = progress_val, message = paste0("Querying AAT (", round(((s/steps) * 100), 2), "% completed)"))
@@ -640,25 +678,7 @@ server <- function(input, output, session) {
     stopCluster(cl)
     progress0$set(message = "Done! Saving results...", value = 1)
     
-    ##Non parallel
-    # results <- list()
-    # 
-    # #Run each row, let the user know of the progress
-    # for (s in seq(1, no_rows)){
-    #   
-    #   res <- find_aat(s)
-    #   progress_val <- round(s / no_rows, 5)
-    #   print(progress_val)
-    #   #progress0$set(value = progress_val, message = paste0("Querying AAT (", round((progress_val * 100), 2), "% completed)"))
-    #   results <- c(results, res)
-    # }
-    #
-    #progress0$set(message = "Done! Loading results...", value = 1)
-    
     results <<- results
-    
-    dbDisconnect(csvinput_db)
-    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
     
     progress0$close()
     progress1 <- shiny::Progress$new()
@@ -679,19 +699,7 @@ server <- function(input, output, session) {
     }
     
     progress1$set(message = "Done!", value = 1)
-    #Drop unusued columns,
-    # need to rewrite since sqlite doesn't work like this. 
-    # Need to create a table copy without the cols, drop table, then rename
-    # if (keywords_field == FALSE){
-    #   n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN keywords")
-    # }
-    # if (linked_field == FALSE){
-    #   n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN linked_aat_term")
-    # }
-    # if (aatnote_field == FALSE){
-    #   n <- dbSendQuery(csvinput_db, "ALTER TABLE csv DROP COLUMN aatnote_field")
-    # }
-    
+
     #Get fresh version of table to display
     this_query <- paste0("SELECT * FROM csv")
     flog.info(paste0("this_query: ", this_query), name = "locations")
@@ -708,10 +716,17 @@ server <- function(input, output, session) {
     
     results_table <- dplyr::select(resultsdf, -aat_note)
     
-    DT::datatable(results_table, caption = paste0('Found ', no_matches, ' matches (of ', total_rows, ', ', round((no_matches/total_rows) * 100, 2), '%) in the Art & Architecture Thesaurus'), escape = FALSE, options = list(searching = TRUE, ordering = TRUE, pageLength = 10, paging = TRUE), rownames = FALSE, selection = 'single')
+    DT::datatable(results_table, 
+                  caption = paste0('Found ', no_matches, ' matches (of ', total_rows, ', ', round((no_matches/total_rows) * 100, 2), '%) in the Art & Architecture Thesaurus'), 
+                  escape = FALSE, 
+                  options = list(searching = TRUE, 
+                                 ordering = TRUE, 
+                                 pageLength = 10, 
+                                 paging = TRUE), 
+                  rownames = FALSE, 
+                  selection = 'single')
   })
 
-  
   
   #aatresult ----
   output$aatresult <- renderUI({
@@ -723,7 +738,7 @@ server <- function(input, output, session) {
     if (!is.na(res$aat_id)){
       AAT_url <- stringr::str_replace(res$aat_id, "aat:", "http://vocab.getty.edu/page/aat/")
       
-      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database2)
+      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
       
       this_query <- paste0("SELECT aat_note FROM csv WHERE aat_id = '", res$aat_id, "' LIMIT 1")
       flog.info(paste0("this_query: ", this_query), name = "locations")
@@ -732,28 +747,14 @@ server <- function(input, output, session) {
       dbDisconnect(csvinput_db)
       
       AAT_term_notes <- note$aat_note
-      #AAT_term_notes <- aat_term_info(stringr::str_replace(res$aat_id, "aat:", ""))
-      
+
       tagList(
         HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
-        HTML(paste0("<dl><dt>Term</dt><dd>", res$aat_term, "</dd><dt>AAT ID</dt><dd><a href=\"", AAT_url, "\" target = _blank title = \"AAT page for this term\">", res$aat_id, "</a></dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
+        HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, "</dd><dt>AAT ID</dt><dd>", res$aat_id, "<br>")),
+        HTML(paste0("</dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
         HTML("</div></div>")
       )
     }
-  })
-
-  
-  
-  #help1 ----
-  output$help1 <- renderUI({
-    HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">How this app works</h3></div><div class=\"panel-body\">
-             <p>This app will take the string in the column \"term\" and match it with the The Art & Architecture Thesaurus using their Linked Open Data portal.</p>
-             <p>Matching methods:</p>
-               <ul>
-                 <li>Term name only: Search for matches only in the subject term names.</li>
-                 <li>Term, notes, etc.: Search in term names, notes, and other fields.</li>
-               </ul>
-            </div></div>")
   })
 }
 
@@ -767,6 +768,6 @@ shinyApp(ui = ui, server = server, onStart = function() {
     cat("Closing\n")
     try(dbDisconnect(csvinput_db), silent = TRUE)
     try(unlink(csv_database), silent = TRUE)
-    try(unlink(csv_database2), silent = TRUE)
   })
 })
+ 
