@@ -17,7 +17,7 @@ library(openxlsx)
 app_name <- "Match Getty AAT"
 app_ver <- "0.4.0"
 github_link <- "https://github.com/Smithsonian/Match-Getty-AAT"
-csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d%H%M%S"), ".sqlite3")
+csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d_%H%M%S_"), (runif(1) * 10000000), ".sqlite3")
 options(stringsAsFactors = FALSE)
 options(encoding = 'UTF-8')
 #Logfile
@@ -32,7 +32,7 @@ ui <- fluidPage(
   # App title
   titlePanel(app_name),
   tabsetPanel(type = "tabs",
-      tabPanel("Step 1 - Batch Matching",
+      tabPanel("Step 1 - Automatic Matching",
          br(),
          fluidRow(
            column(width = 4,
@@ -59,24 +59,24 @@ ui <- fluidPage(
       tabPanel("Step 2 - Manual Matching",
          br(),
          fluidRow(
-            column(width = 4, 
-                   br(),
-                   uiOutput("step1_msg"),
-                   uiOutput("choose_string"),
-                   uiOutput("chosen_string")
-            ),
-            column(width = 8,
-                   uiOutput("topcategories")
-            )
-          ),
-          fluidRow(
-            column(width = 8,
-                   DT::dataTableOutput("step2table")
-            ),
-            column(width = 4,
-                   uiOutput("step2detail")
-              )
-          )
+           column(width = 10, 
+                  fluidRow(
+                    column(width = 4, 
+                           br(),
+                           uiOutput("step1_msg"),
+                           uiOutput("choose_string"),
+                           uiOutput("chosen_string")
+                    ),
+                    column(width = 8,
+                           uiOutput("step2detail")
+                    )
+                  ),
+                  DT::dataTableOutput("step2table")
+           ),
+           column(width = 2,
+                  uiOutput("topcategories")
+           )
+         )
       ),
       tabPanel("Step 3 - Download Results",
          br(),
@@ -93,7 +93,9 @@ ui <- fluidPage(
   ),
   hr(),
   #footer
-  HTML(paste0("<br><br><br><div class=\"footer navbar-fixed-bottom\" style=\"background: #FFFFFF;\"><br><p>&nbsp;&nbsp;<a href=\"http://dpo.si.edu\" target = _blank><img src=\"dpologo.jpg\"></a> | ", app_name, ", ver. ", app_ver, " | <a href=\"", github_link, "\" target = _blank>Source code</a></p></div>"))
+  HTML(paste0("<br><br><br><div class=\"footer navbar-fixed-bottom\" style=\"background: #FFFFFF;\"><br><p>&nbsp;&nbsp;<a href=\"http://dpo.si.edu\" target = _blank><img src=\"dpologo.jpg\"></a> | ", app_name, ", ver. ", app_ver, " | <a href=\"", github_link, "\" target = _blank>Source code</a></p></div>")),
+  HTML("<style>
+       .btn{margin-bottom: 10px;}</style>")
 )
 
 
@@ -388,12 +390,28 @@ server <- function(input, output, session) {
       AAT_term_notes <- note$aat_note
       
       tagList(
-        HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
-        HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, 
+        HTML("<div class=\"panel panel-success\">
+                <div class=\"panel-heading\">
+                  <h3 class=\"panel-title\">Row selected</h3>
+                </div>
+                <div class=\"panel-body\">"),
+                HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, 
                     "</dd><dt>AAT ID</dt><dd>", stringr::str_replace(res$aat_id, "aat:", ""), " ",
                     actionLink("showaat2", label = "", icon = icon("info-sign", lib = "glyphicon"), title = "AAT page for this term", alt = "AAT page for this term"))),
-        HTML(paste0("</dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
+                HTML(paste0("</dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
         HTML("</div></div>")
+      )
+    }else{
+      tagList(
+        HTML("<div class=\"panel panel-danger\">
+                <div class=\"panel-heading\"> 
+                  <h3 class=\"panel-title\">Row selected</h3> 
+                </div> 
+                <div class=\"panel-body\">
+                  <p>The app could not find a match for this row automatically or there were too many matches.</p>
+                  <p>In <code>Step 2</code> you can select the best match manually.</p>
+                </div>
+              </div>")
       )
     }
   })
@@ -441,7 +459,7 @@ server <- function(input, output, session) {
     
     top_categories <- cbind(categories, ids)
     
-    radioGroupButtons("topcats", "Search in this top AAT category:",
+    radioGroupButtons("topcats", "Search in this AAT category:",
                       choiceNames = categories,
                       choiceValues = ids,
                       direction = "horizontal",
@@ -490,7 +508,6 @@ server <- function(input, output, session) {
   output$topcategories <- renderUI({
     req(input$csvinput)
     tagList(
-      br(),
       HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Filter results by AAT Top-level Subjects</h3> </div> <div class=\"panel-body\">"),
       uiOutput("aattop"),
       hr(),
@@ -506,7 +523,7 @@ server <- function(input, output, session) {
     req(input$row)
     req(input$topcats)
     
-    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    #csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
     this_query <- paste0("SELECT * FROM csv WHERE rowid = ", input$row)
     flog.info(paste0("this_query: ", this_query), name = "locations")
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
@@ -540,7 +557,7 @@ server <- function(input, output, session) {
     json <- fromJSON(paste0(getty_url, getty_query))
     
     if (length(json$results$bindings$Subject$value) > 0){
-      #Get the parent strings, remove pipes
+      #Get the parent strings, remove pipes and other formatting
       parents_strings <- str_replace_all(string = json$results$bindings$Parents$value, pattern = ">", replacement = "")
       parents_strings <- str_replace_all(string = parents_strings, pattern = "<", replacement = "|")
       parents_strings <- str_replace_all(string = parents_strings, pattern = ", ", replacement = "|")
@@ -576,10 +593,11 @@ server <- function(input, output, session) {
                                  pageLength = 15, 
                                  paging = TRUE, 
                                  language = list(zeroRecords = "No matches found")
-                                 ), 
+                  ), 
                   rownames = FALSE, 
-                  selection = 'single', 
+                  selection = 'single',
                   caption = "Select a subject to match") %>% formatStyle("parents", "white-space" = "nowrap") %>% formatStyle("term", "white-space" = "nowrap")
+
   })
   
   
@@ -598,34 +616,45 @@ server <- function(input, output, session) {
       output$chosen_string <- renderUI({HTML("&nbsp;")})
     }
     
-    req(input$step2table_rows_selected)
-    
-    res <- results[input$step2table_rows_selected, ]
-    
-    AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
-    
-    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    this_row <- dbGetQuery(csvinput_db, paste0("SELECT * FROM csv WHERE rowid = ", input$row))
-    this_row_term <- this_row$term
-    this_row_id <- this_row$id
-    row_count <- dbGetQuery(csvinput_db, paste0("SELECT count(*) AS no_rows FROM csv WHERE aat_id IS NULL AND term = '", this_row_term, "'"))
-    
-    dbDisconnect(csvinput_db)
-    
-    tagList(
-      HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
-      HTML(paste0("<dl class=\"dl-horizontal\"><dt>ID</dt><dd>", this_row_id, "</dd><dt>Term</dt><dd>", res$term, "</dd><dt>AAT ID</dt><dd>", res$id)),
-      #actionLink("showaat", "[AAT page for this term]"),
-      actionLink("showaat", label = "", icon = icon("info-sign", lib = "glyphicon"), title = "AAT page for this term", alt = "AAT page for this term"),
-      HTML("</dd></dl></p>"),
-      # Save button
-      actionButton("saverow", paste0("Save this AAT term for item ID ", this_row_id), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon")),
-      br(),
-      br(),
-      if (row_count$no_rows > 1){actionButton("saverowall", paste0("Save this AAT term for the ", row_count$no_rows, " rows with term '", this_row_term, "'"), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon"))},
-      #uiOutput("insert_msg"),
-      HTML("</div></div>")
-    )
+    if (!is.null(input$step2table_rows_selected)){
+      res <- results[input$step2table_rows_selected, ]
+      
+      AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
+      
+      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+      this_row <- dbGetQuery(csvinput_db, paste0("SELECT * FROM csv WHERE rowid = ", input$row))
+      this_row_term <- this_row$term
+      this_row_id <- this_row$id
+      row_count <- dbGetQuery(csvinput_db, paste0("SELECT count(*) AS no_rows FROM csv WHERE aat_id IS NULL AND term = '", this_row_term, "'"))
+      
+      dbDisconnect(csvinput_db)
+      
+      tagList(
+        HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
+        HTML(paste0("<dl class=\"dl-horizontal\"><dt>ID</dt><dd>", this_row_id, "</dd><dt>Term</dt><dd>", res$term, "</dd><dt>AAT ID</dt><dd>", res$id)),
+        actionLink("showaat", label = "", icon = icon("info-sign", lib = "glyphicon"), title = "AAT page for this term", alt = "AAT page for this term"),
+        HTML("</dd></dl></p>"),
+        # Save button
+        actionButton("saverow", paste0("Save this AAT term for item ID ", this_row_id), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon")),
+        br(),
+        br(),
+        if (row_count$no_rows > 1){actionButton("saverowall", paste0("Save this AAT term for the ", row_count$no_rows, " rows with term: ", this_row_term), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon"))},
+        HTML("</div></div>")
+      )
+    }else{
+      tagList(
+        HTML("<div class=\"panel panel-success\"> 
+                <div class=\"panel-heading\"> 
+                  <h3 class=\"panel-title\">Result selected</h3> 
+                </div> 
+                <div class=\"panel-body\">
+                  <br>
+                  <em>Select a match from the table below.</em>
+                  <br>
+                </div>
+              </div>")
+      )
+    }
   })
   
   
@@ -697,8 +726,7 @@ server <- function(input, output, session) {
     n <- dbExecute(csvinput_db, query)
     dbDisconnect(csvinput_db)
     output$chosen_string <- renderUI({
-      #HTML("<br><div class=\"alert alert-success\" role=\"alert\">Term saved</div>")
-      HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for objects with term: ", selected_row[2], " (", selected_row[1], ")</div>"))
+      HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for objects with term: ", this_row_term, "</div>"))
     })
   })
   
@@ -718,7 +746,6 @@ server <- function(input, output, session) {
       if (keywords_field == FALSE){
         data <- dplyr::select(data, -keywords)
       }
-      
       if (linked_field == FALSE){
         data <- dplyr::select(data, -linked_aat_term)
       }
@@ -741,7 +768,6 @@ server <- function(input, output, session) {
       if (keywords_field == FALSE){
         data <- dplyr::select(data, -keywords)
       }
-      
       if (linked_field == FALSE){
         data <- dplyr::select(data, -linked_aat_term)
       }
@@ -774,9 +800,6 @@ server <- function(input, output, session) {
       status = "primary"
     )
   })
-  
-  
-  
 }
 
 
