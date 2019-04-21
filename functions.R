@@ -154,6 +154,46 @@ csv_to_sqlite <- function(csv_database, csvinput){
   n <- dbExecute(csvinput_db, "CREATE INDEX id_index ON csv(id);")
   n <- dbExecute(csvinput_db, "CREATE INDEX id_term ON csv(term);")
   
+  #Add table for keywords
+  n <- dbExecute(csvinput_db, "CREATE TABLE keywords (csv_rowid integer, aat_id integer);")
+  n <- dbExecute(csvinput_db, "CREATE INDEX keywords_csv_rowid_idx ON keywords(csv_rowid);")
+  n <- dbExecute(csvinput_db, "CREATE INDEX keywords_aat_id_idx ON keywords(aat_id);")
+  
   #Close file
   dbDisconnect(csvinput_db)
+}
+
+
+term_score <- function(term, keywords){
+  
+  getty_url <- "http://vocab.getty.edu/sparql.json?query="
+  
+  getty_query <- "select ?Subject {
+            	          ?Subject a skos:Concept; luc:term \"%s\"; 
+            	          skos:inScheme aat: ;
+                      }"
+  
+  #break up the keyword text, removing stop words
+  kwords <- tokenize_words(keywords, stopwords = stopwords::stopwords("en"), simplify = TRUE)
+
+  #process each keyword
+  for (w in seq(1, length(keywords))){
+    #Join words with AND
+    string_to_find <- paste0(term, " AND ", keywords[w])
+    
+    #Replace search string in query
+    getty_query <- sprintf(getty_query, string_to_find)
+    
+    flog.info(paste0("Item query: ", getty_query), name = "getty")
+    
+    #URLencode the query
+    getty_query <- URLencode(getty_query, reserved = FALSE)
+    
+    json <- fromJSON(paste0(getty_url, getty_query))
+    
+    #CONTINUE
+  }
+  
+  
+  
 }

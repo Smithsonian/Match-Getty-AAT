@@ -11,6 +11,8 @@ library(shinycssloaders)
 library(parallel)
 library(WriteXLS)
 library(openxlsx)
+library(tokenizers)
+library(stopwords)
 
 
 
@@ -274,20 +276,6 @@ server <- function(input, output, session) {
     }else{
       linked_field <<- TRUE
     }
-    
-    #Create database indices
-    this_query <- paste0("CREATE INDEX csv_id_idx ON csv(id);")
-    flog.info(paste0("this_query: ", this_query), name = "locations")
-    n <- dbSendQuery(csvinput_db, this_query)
-    this_query <- paste0("CREATE INDEX csv_term_idx ON csv(term);")
-    flog.info(paste0("this_query: ", this_query), name = "locations")
-    n <- dbSendQuery(csvinput_db, this_query)
-    this_query <- paste0("CREATE INDEX csv_keywords_idx ON csv(keywords);")
-    flog.info(paste0("this_query: ", this_query), name = "locations")
-    n <- dbSendQuery(csvinput_db, this_query)
-    this_query <- paste0("CREATE INDEX csv_laatt_idx ON csv(linked_aat_term);")
-    flog.info(paste0("this_query: ", this_query), name = "locations")
-    n <- dbSendQuery(csvinput_db, this_query)
     
     this_query <- paste0("SELECT term, linked_aat_term, keywords FROM csv GROUP BY term, linked_aat_term, keywords")
     flog.info(paste0("this_query: ", this_query), name = "locations")
