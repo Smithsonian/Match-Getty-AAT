@@ -13,6 +13,7 @@ library(WriteXLS)
 library(openxlsx)
 
 
+
 #Settings----
 app_name <- "Match Getty AAT"
 app_ver <- "0.4.0"
@@ -24,6 +25,7 @@ options(encoding = 'UTF-8')
 logfile <- paste0("logs/", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
 #load functions
 source("functions.R")
+
 
 
 #UI----
@@ -92,8 +94,9 @@ ui <- fluidPage(
       )
   ),
   hr(),
-  #footer
+  #footer ----
   HTML(paste0("<br><br><br><div class=\"footer navbar-fixed-bottom\" style=\"background: #FFFFFF;\"><br><p>&nbsp;&nbsp;<a href=\"http://dpo.si.edu\" target = _blank><img src=\"dpologo.jpg\"></a> | ", app_name, ", ver. ", app_ver, " | <a href=\"", github_link, "\" target = _blank>Source code</a></p></div>")),
+  #Fix for category buttons
   HTML("<style>
        .btn{margin-bottom: 10px;}</style>")
 )
@@ -103,7 +106,7 @@ ui <- fluidPage(
 #Server----
 server <- function(input, output, session) {
   
-  #Logging
+  #Setup Logging
   dir.create('logs', showWarnings = FALSE)
   flog.logger("getty", INFO, appender=appender.file(logfile))
   
@@ -146,7 +149,7 @@ server <- function(input, output, session) {
     if (is.null(input$csvinput)){
       shinyWidgets::panel(
         p("Match Getty AAT is a prototype app that matches terms in a file to the ", tags$strong("Getty Art & Architecture Thesaurus"), "using their Linked Open Data portal."),
-        HTML("<p><img src=\"http://www.getty.edu/research/tools/vocabularies/images/header_aat_main.gif\"></p>"),
+        HTML("<p><img src=\"header_aat_main.gif\"></p>"),
         p("The app tries to find the best match by using a set of keywords included with each row, when available, to try to disambiguate the usage. For terms where many matches are found, the app allows the user to select the best one. Once the process is completed, the results file can be downloaded for further processing or importing to the CIS or other database."),
         HTML("<p>This app was made by the Digitization Program Office, OCIO.</p><p>The AAT is queried using their Linked Open Data SPARQL endpoint: <a href=\"http://vocab.getty.edu/queries\">http://vocab.getty.edu/queries</a></p>"),
         heading = "Welcome",
@@ -191,7 +194,7 @@ server <- function(input, output, session) {
                        ".csv",
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        ".xlsx"), 
-            width = "580px")
+            width = "100%")
       )
     }
   })
@@ -201,7 +204,7 @@ server <- function(input, output, session) {
   output$step1table <- DT::renderDataTable({
     req(input$csvinput)
     
-    #Read Upload----
+    #Read Upload
     filename_to_check <- input$csvinput$name
     ext_to_check <- stringr::str_split(filename_to_check, '[.]')[[1]]
     ext_to_check <- ext_to_check[length(ext_to_check)]
@@ -236,6 +239,7 @@ server <- function(input, output, session) {
         csv_to_sqlite(csv_database, csvinput)
       }
     }else{
+      #Some other file or there was a problem
       flog.error(paste0("Error reading file: ", filename_to_check), name = "csv")
       output$error_msg <- renderUI({
         HTML("<br><div class=\"alert alert-danger\" role=\"alert\">File must be a valid and have the extension csv or xlsx. Please reload the application and try again.</div>")
@@ -249,7 +253,7 @@ server <- function(input, output, session) {
     #Open database
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
     this_query <- paste0("PRAGMA table_info(csv);")
-    flog.info(paste0("this_query: ", this_query), name = "locations")
+    flog.info(paste0("database: ", csv_database), name = "locations")
     table_info <- dbGetQuery(csvinput_db, this_query)$name
     
     #Optional columns
@@ -271,6 +275,20 @@ server <- function(input, output, session) {
       linked_field <<- TRUE
     }
     
+    #Create database indices
+    this_query <- paste0("CREATE INDEX csv_id_idx ON csv(id);")
+    flog.info(paste0("this_query: ", this_query), name = "locations")
+    n <- dbSendQuery(csvinput_db, this_query)
+    this_query <- paste0("CREATE INDEX csv_term_idx ON csv(term);")
+    flog.info(paste0("this_query: ", this_query), name = "locations")
+    n <- dbSendQuery(csvinput_db, this_query)
+    this_query <- paste0("CREATE INDEX csv_keywords_idx ON csv(keywords);")
+    flog.info(paste0("this_query: ", this_query), name = "locations")
+    n <- dbSendQuery(csvinput_db, this_query)
+    this_query <- paste0("CREATE INDEX csv_laatt_idx ON csv(linked_aat_term);")
+    flog.info(paste0("this_query: ", this_query), name = "locations")
+    n <- dbSendQuery(csvinput_db, this_query)
+    
     this_query <- paste0("SELECT term, linked_aat_term, keywords FROM csv GROUP BY term, linked_aat_term, keywords")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     all_rows <- dbGetQuery(csvinput_db, this_query)
@@ -282,8 +300,11 @@ server <- function(input, output, session) {
     
     no_rows <- dim(all_rows)[1]
     
-    # Calculate the number of cores
-    no_cores <- detectCores() - 1
+    #parallel ----
+    # Calculate the number of cores, if not in settings
+    if (!exists("no_cores")){
+      no_cores <- detectCores() - 1
+    }
     # Initiate cluster
     cl <- makeCluster(no_cores)
     
@@ -291,7 +312,7 @@ server <- function(input, output, session) {
     clusterExport(cl=cl, varlist=c("all_rows", "logfile"), envir=environment())
     
     #Divide into steps
-    step_grouping <- no_cores * 2
+    step_grouping <- no_cores * 3
     steps <- ceiling(dim(all_rows)[1] / step_grouping)
     
     progress_steps <- round(((0.9) / steps), 4)
@@ -392,7 +413,7 @@ server <- function(input, output, session) {
       tagList(
         HTML("<div class=\"panel panel-success\">
                 <div class=\"panel-heading\">
-                  <h3 class=\"panel-title\">Row selected</h3>
+                  <h3 class=\"panel-title\">Match found</h3>
                 </div>
                 <div class=\"panel-body\">"),
                 HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, 
@@ -405,7 +426,7 @@ server <- function(input, output, session) {
       tagList(
         HTML("<div class=\"panel panel-danger\">
                 <div class=\"panel-heading\"> 
-                  <h3 class=\"panel-title\">Row selected</h3> 
+                  <h3 class=\"panel-title\">Could not find match</h3> 
                 </div> 
                 <div class=\"panel-body\">
                   <p>The app could not find a match for this row automatically or there were too many matches.</p>
@@ -421,7 +442,7 @@ server <- function(input, output, session) {
   output$choose_string <- renderUI({
     output$step1_msg <- renderUI({
       HTML("<br>
-          <div class=\"alert alert-info\" role=\"alert\">Upload a file in Step 1 to run the matching system.</div>")
+          <div class=\"alert alert-info\" role=\"alert\">Upload a file in Step 1</div>")
     })
 
     req(input$csvinput)
@@ -781,7 +802,7 @@ server <- function(input, output, session) {
   #downloadData ----
   output$downloadData <- renderUI({
     output$step1_msg2 <- renderUI({
-      HTML("<br><div class=\"alert alert-info\" role=\"alert\">Upload a file in Step 1 to run the matching system.</div>")
+      HTML("<br><div class=\"alert alert-info\" role=\"alert\">Upload a file in Step 1</div>")
     })
     
     req(input$csvinput)
@@ -790,7 +811,7 @@ server <- function(input, output, session) {
     
     shinyWidgets::panel(
       HTML("<p>Download the results as a Comma Separated Values file (.csv) or an Excel file (.xlsx).</p><p>The results file contains the same columns as the input file, untouched, with three additional columns:</p>"),
-      HTML("<ul><li>aat_id</li><li>aat_term</li><li>aat_note</li></ul>"),
+      HTML("<ul><li>aat_id - ID of the term matched</li><li>aat_term - Term matched</li><li>aat_note - Usage note for the term matched</li></ul>"),
       br(),
       HTML("<div class=\"btn-toolbar\">"),
       downloadButton("downloadcsv1", "CSV (.csv)", class = "btn-success"),
