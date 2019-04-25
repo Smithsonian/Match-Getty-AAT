@@ -11,8 +11,6 @@ library(shinycssloaders)
 library(parallel)
 library(WriteXLS)
 library(openxlsx)
-library(tokenizers)
-library(stopwords)
 
 
 
@@ -62,8 +60,8 @@ ui <- fluidPage(
       ),
       tabPanel("Step 2 - Manual Matching",
          br(),
-         fluidRow(
-           column(width = 10, 
+         #fluidRow(
+           #column(width = 10, 
                   fluidRow(
                     column(width = 4, 
                            br(),
@@ -76,11 +74,11 @@ ui <- fluidPage(
                     )
                   ),
                   DT::dataTableOutput("step2table")
-           ),
-           column(width = 2,
-                  uiOutput("topcategories")
-           )
-         )
+           #)
+           # column(width = 2,
+           #        uiOutput("topcategories")
+           # )
+         #)
       ),
       tabPanel("Step 3 - Download Results",
          br(),
@@ -139,7 +137,7 @@ server <- function(input, output, session) {
           </ul>
           <p>Two columns are optional:</p>
           <ul>
-             <li><samp>keywords</samp> - words or phrases (separated by pipes: <samp>|</samp>) to filter matching term</li>
+             <li><samp>keywords</samp> - words or phrases that describe the item, which are used to rate the matching terms</li>
              <li><samp>linked_aat_term</samp> - AAT term from previous efforts</li>
           </ul>
           <p>Any other columns in the input file will be ignored but returned in the results file.</p>")
@@ -277,7 +275,7 @@ server <- function(input, output, session) {
       linked_field <<- TRUE
     }
     
-    this_query <- paste0("SELECT term, linked_aat_term, keywords FROM csv GROUP BY term, linked_aat_term, keywords")
+    this_query <- paste0("SELECT rowid, term, linked_aat_term, keywords FROM csv")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     all_rows <- dbGetQuery(csvinput_db, this_query)
     
@@ -297,7 +295,7 @@ server <- function(input, output, session) {
     cl <- makeCluster(no_cores)
     
     #Export data to cluster
-    clusterExport(cl=cl, varlist=c("all_rows", "logfile"), envir=environment())
+    clusterExport(cl=cl, varlist=c("all_rows", "logfile", "csv_database"), envir=environment())
     
     #Divide into steps
     step_grouping <- no_cores * 3
@@ -313,6 +311,9 @@ server <- function(input, output, session) {
     for (s in seq(1, steps)){
       to_row <- s * step_grouping
       from_row <- to_row - step_grouping
+      if (to_row > no_rows){
+        to_row <- no_rows
+      }
       
       if (from_row == 0){
         from_row <- 1
@@ -326,29 +327,29 @@ server <- function(input, output, session) {
     
     #stop cluster
     stopCluster(cl)
-    progress0$set(message = "Done! Saving results...", value = 1)
+    #progress0$set(message = "Done! Saving results...", value = 1)
+    progress0$set(message = "Done!", value = 1)
     
-    results <<- results
     
-    progress0$close()
-    progress1 <- shiny::Progress$new()
-    on.exit(progress1$close())
-    
-    #Save the results to the database
-    for (i in 1:length(results)){
-      if (!is.na(results[[i]]$aat_id)){
-        this_query <- paste0("UPDATE csv SET aat_term = '", results[[i]]$aat_term, "', aat_id = '", results[[i]]$aat_id, "', aat_note = '", results[[i]]$aat_note, "' WHERE term = '", results[[i]]$term, "' AND keywords = '", results[[i]]$keywords, "' AND linked_aat_term = '", results[[i]]$linked_aat_term,"'")
-        flog.info(paste0("this_query: ", this_query), name = "matches_aat")
-        n <- dbSendQuery(csvinput_db, this_query)
-        dbClearResult(n)
-      }
-      progress1$set(message = "Saving results...", value = round(i/no_rows, 4))
+    res_df <- data.frame(matrix(ncol = 4, nrow = 0, data = NA))
+    for (i in seq(1, length(results))){
+      data <- data.frame(results[[i]])
+      res_df <- rbind(res_df, data)
     }
     
-    progress1$set(message = "Done!", value = 1)
+    names(res_df) = c("csv_rowid", "aat_term", "aat_id", "aat_note")
+    res_df <- dplyr::filter(res_df, !is.na(aat_id))
+    
+    #Add table of results
+    dbWriteTable(csvinput_db, "matches", res_df, overwrite = TRUE)
+    n <- dbExecute(csvinput_db, "CREATE INDEX matches_csv_rowid_idx ON matches(csv_rowid);")
+    n <- dbExecute(csvinput_db, "CREATE INDEX matches_aat_id_idx ON matches(aat_id);")
+    n <- dbExecute(csvinput_db, "CREATE INDEX matches_aat_term_idx ON matches(aat_term);")
+    
+    #progress0$close()
     
     #Get fresh version of table to display
-    this_query <- paste0("SELECT *, REPLACE(aat_id, 'aat:', '') as aat_id_int FROM csv")
+    this_query <- paste0("SELECT c.rowid, c.*, m.*, REPLACE(aat_id, 'aat:', '') aat_id_int, COALESCE(m1.no_matches, 0) as no_matches, COALESCE(m1.no_matches, 0) as 'Number of matches' FROM csv c LEFT JOIN (SELECT csv_rowid, COUNT(*) AS no_matches FROM matches GROUP BY csv_rowid) m1 ON c.rowid = m1.csv_rowid LEFT JOIN matches m ON m1.csv_rowid = m.csv_rowid AND (m1.no_matches == 1 OR m1.no_matches IS NULL)")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     resultsdf1 <- dbGetQuery(csvinput_db, this_query)
     
@@ -357,15 +358,26 @@ server <- function(input, output, session) {
     total_rows <- dim(resultsdf)[1]
     
     #How many matches?
-    this_query <- paste0("SELECT COUNT(*) as no_matches FROM csv WHERE aat_id IS NOT NULL")
+    this_query <- paste0("SELECT COUNT(*) as no_matches FROM csv WHERE rowid IN (SELECT DISTINCT csv_rowid FROM matches)")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     no_matches <- dbGetQuery(csvinput_db, this_query)$no_matches
     
     dbDisconnect(csvinput_db)
     
     results_table <- dplyr::select(resultsdf1, -aat_note)
+    results_table <- dplyr::select(results_table, -csv_rowid)
+    results_table <- dplyr::select(results_table, -rowid)
+    results_table <- dplyr::select(results_table, -aat_term)
     results_table <- dplyr::select(results_table, -aat_id)
-    results_table <- dplyr::rename(results_table, aat_id = aat_id_int)
+    results_table <- dplyr::select(results_table, -aat_id_int)
+    results_table <- dplyr::select(results_table, -no_matches)
+    #results_table <- dplyr::rename(results_table, aat_id = aat_id_int)
+    
+    no_cols <- dim(results_table)[2]
+    
+    no_matches_vals <- unique(resultsdf$no_matches)
+    no_matches_vals <- no_matches_vals[!no_matches_vals %in% 0:1]
+    no_matches_vals_colors <- rep('#fcf8e3', length(no_matches_vals))
     
     DT::datatable(results_table, 
                   caption = paste0('Found ', no_matches, ' matches automatically in the AAT (of ', total_rows, ', ', round((no_matches/total_rows) * 100, 2), '%)'), 
@@ -375,7 +387,10 @@ server <- function(input, output, session) {
                                  pageLength = 10, 
                                  paging = TRUE), 
                   rownames = FALSE, 
-                  selection = 'single')
+                  selection = 'single')  %>% DT::formatStyle(
+                    no_cols,
+                    backgroundColor = DT::styleEqual(c(0, 1, no_matches_vals), c('#f2dede', '#dff0d8', no_matches_vals_colors)),
+                  )
   })
   
   
@@ -386,42 +401,49 @@ server <- function(input, output, session) {
     
     res <- resultsdf[input$step1table_rows_selected, ]
     
-    if (!is.na(res$aat_id)){
+    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    
+    this_query <- paste0("SELECT aat_note FROM matches WHERE csv_rowid = ", res$rowid)
+    flog.info(paste0("this_query: ", this_query), name = "locations")
+    note <- dbGetQuery(csvinput_db, this_query)
+    
+    dbDisconnect(csvinput_db)
+    
+    if (dim(note)[1] == 1){
       
-      csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-      
-      this_query <- paste0("SELECT aat_note FROM csv WHERE aat_id = '", res$aat_id, "' LIMIT 1")
-      flog.info(paste0("this_query: ", this_query), name = "locations")
-      note <- dbGetQuery(csvinput_db, this_query)
-      
-      dbDisconnect(csvinput_db)
-      
-      AAT_term_notes <- note$aat_note
+      AAT_term_notes <- note$aat_note[1]
       
       tagList(
         HTML("<div class=\"panel panel-success\">
-                <div class=\"panel-heading\">
-                  <h3 class=\"panel-title\">Match found</h3>
-                </div>
-                <div class=\"panel-body\">"),
-                HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, 
-                    "</dd><dt>AAT ID</dt><dd>", stringr::str_replace(res$aat_id, "aat:", ""), " ",
+              <div class=\"panel-heading\">
+                <h3 class=\"panel-title\">Match found</h3>
+              </div>
+              <div class=\"panel-body\">"),
+        HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, 
+                    "</dd><dt>AAT ID</dt><dd>", res$aat_id_int, " ",
                     actionLink("showaat2", label = "", icon = icon("info-sign", lib = "glyphicon"), title = "AAT page for this term", alt = "AAT page for this term"))),
-                HTML(paste0("</dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
+        HTML(paste0("</dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),
         HTML("</div></div>")
       )
+    }else if (dim(note)[1] > 1){
+      HTML("<div class=\"panel panel-warning\">
+            <div class=\"panel-heading\"> 
+              <h3 class=\"panel-title\">Could not find a single match</h3> 
+            </div> 
+            <div class=\"panel-body\">
+              <p>The app could not find a single match for this row automatically.</p>
+              <p>In <code>Step 2</code> you can select the best match manually.</p>
+            </div>
+          </div>")
     }else{
-      tagList(
         HTML("<div class=\"panel panel-danger\">
-                <div class=\"panel-heading\"> 
-                  <h3 class=\"panel-title\">Could not find match</h3> 
-                </div> 
-                <div class=\"panel-body\">
-                  <p>The app could not find a match for this row automatically or there were too many matches.</p>
-                  <p>In <code>Step 2</code> you can select the best match manually.</p>
-                </div>
-              </div>")
-      )
+            <div class=\"panel-heading\"> 
+              <h3 class=\"panel-title\">Could not find match</h3> 
+            </div> 
+            <div class=\"panel-body\">
+              <p>The app could not find a match for this row.</p>
+            </div>
+          </div>")
     }
   })
   
@@ -438,7 +460,7 @@ server <- function(input, output, session) {
     output$step1_msg <- renderUI({HTML("")})
     
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    csvinput1 <- dbGetQuery(csvinput_db, "SELECT rowid, term, id from csv WHERE aat_id IS NULL")
+    csvinput1 <- dbGetQuery(csvinput_db, "WITH data AS (SELECT csv_rowid, count(*) as no_matches FROM matches GROUP BY csv_rowid) SELECT c.rowid, c.* FROM csv c, data d WHERE c.rowid = d.csv_rowid AND d.no_matches > 1")
     dbDisconnect(csvinput_db)
     
     choices <- data.frame(csvinput1$rowid, paste0(csvinput1$term, " (", csvinput1$id, ")"))
@@ -455,75 +477,75 @@ server <- function(input, output, session) {
   
   
   #aattop----
-  output$aattop <- renderUI({
-    getty_url <- "http://vocab.getty.edu/sparql.json?query="
-    getty_top <- "select * {?f a gvp:Facet; skos:inScheme aat: ; gvp:prefLabelGVP/xl:literalForm ?l}"
-    getty_query <- URLencode(getty_top, reserved = FALSE)
-    json_top <- fromJSON(paste0(getty_url, getty_query))
-    
-    categories <- c("[All]", json_top$results$bindings$l$value)
-    categories <- stringr::str_replace_all(categories, ' Facet', '')
-    ids <- c("all", json_top$results$bindings$f$value)
-    ids <- stringr::str_replace_all(ids, 'http://vocab.getty.edu/aat/', '')
-    
-    top_categories <- cbind(categories, ids)
-    
-    radioGroupButtons("topcats", "Search in this AAT category:",
-                      choiceNames = categories,
-                      choiceValues = ids,
-                      direction = "horizontal",
-                      individual = TRUE,
-                      status = "primary",
-                      selected = "all")
-  })
+  # output$aattop <- renderUI({
+  #   getty_url <- "http://vocab.getty.edu/sparql.json?query="
+  #   getty_top <- "select * {?f a gvp:Facet; skos:inScheme aat: ; gvp:prefLabelGVP/xl:literalForm ?l}"
+  #   getty_query <- URLencode(getty_top, reserved = FALSE)
+  #   json_top <- fromJSON(paste0(getty_url, getty_query))
+  #   
+  #   categories <- c("[All]", json_top$results$bindings$l$value)
+  #   categories <- stringr::str_replace_all(categories, ' Facet', '')
+  #   ids <- c("all", json_top$results$bindings$f$value)
+  #   ids <- stringr::str_replace_all(ids, 'http://vocab.getty.edu/aat/', '')
+  #   
+  #   top_categories <- cbind(categories, ids)
+  #   
+  #   radioGroupButtons("topcats", "Search in this AAT category:",
+  #                     choiceNames = categories,
+  #                     choiceValues = ids,
+  #                     direction = "horizontal",
+  #                     individual = TRUE,
+  #                     status = "primary",
+  #                     selected = "all")
+  # })
   
   
   #aatsub----
-  output$aatsub <- renderUI({
-    req(input$topcats)
-    if (input$topcats != "all"){
-      #Sub categories
-      getty_url <- "http://vocab.getty.edu/sparql.json?query="
-      getty_q <- "select * {?x gvp:broader aat:%s; skos:inScheme aat: ; gvp:prefLabelGVP/xl:literalForm ?l}"
-      getty_q <- sprintf(getty_q, input$topcats)
-      
-      getty_query <- URLencode(getty_q, reserved = FALSE)
-      json_top <- fromJSON(paste0(getty_url, getty_query))
-      
-      subcategories <- json_top$results$bindings$l$value
-      subcategories <- stringr::str_replace_all(subcategories, 'hierarchy name', '')
-      subcategories <- stringr::str_replace_all(subcategories, '[(]', '')
-      subcategories <- stringr::str_replace_all(subcategories, '[)]', '')
-      subcategories <- stringr::str_trim(subcategories)
-      
-      subcats_ids <- json_top$results$bindings$x$value
-      subcats_ids <- stringr::str_replace_all(subcats_ids, 'http://vocab.getty.edu/aat/', '')
-      
-      sub_categories <- cbind(subcategories, subcats_ids)
-      
-      radioGroupButtons("subcats", "Search in this subcategory:",
-                        choiceNames = subcategories,
-                        choiceValues = subcats_ids,
-                        direction = "horizontal",
-                        individual = TRUE,
-                        status = "default", 
-                        selected = NA, 
-                        size = "sm")
-    }
-  })
+  # output$aatsub <- renderUI({
+  #   req(input$topcats)
+  #   if (input$topcats != "all"){
+  #     #Sub categories
+  #     getty_url <- "http://vocab.getty.edu/sparql.json?query="
+  #     getty_q <- "select * {?x gvp:broader aat:%s; skos:inScheme aat: ; gvp:prefLabelGVP/xl:literalForm ?l}"
+  #     getty_q <- sprintf(getty_q, input$topcats)
+  #     
+  #     getty_query <- URLencode(getty_q, reserved = FALSE)
+  #     json_top <- fromJSON(paste0(getty_url, getty_query))
+  #     
+  #     subcategories <- json_top$results$bindings$l$value
+  #     subcategories <- stringr::str_replace_all(subcategories, 'hierarchy name', '')
+  #     subcategories <- stringr::str_replace_all(subcategories, '[(]', '')
+  #     subcategories <- stringr::str_replace_all(subcategories, '[)]', '')
+  #     subcategories <- stringr::str_trim(subcategories)
+  #     
+  #     subcats_ids <- json_top$results$bindings$x$value
+  #     subcats_ids <- stringr::str_replace_all(subcats_ids, 'http://vocab.getty.edu/aat/', '')
+  #     
+  #     sub_categories <- cbind(subcategories, subcats_ids)
+  #     
+  #     radioGroupButtons("subcats", "Search in this subcategory:",
+  #                       choiceNames = subcategories,
+  #                       choiceValues = subcats_ids,
+  #                       direction = "horizontal",
+  #                       individual = TRUE,
+  #                       status = "default", 
+  #                       selected = NA, 
+  #                       size = "sm")
+  #   }
+  # })
   
   
   #topcategories----
-  output$topcategories <- renderUI({
-    req(input$csvinput)
-    tagList(
-      HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Filter results by AAT Top-level Subjects</h3> </div> <div class=\"panel-body\">"),
-      uiOutput("aattop"),
-      hr(),
-      uiOutput("aatsub"),
-      HTML("</div></div>")
-    )
-  })
+  # output$topcategories <- renderUI({
+  #   req(input$csvinput)
+  #   tagList(
+  #     HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Filter results by AAT Top-level Subjects</h3> </div> <div class=\"panel-body\">"),
+  #     uiOutput("aattop"),
+  #     hr(),
+  #     uiOutput("aatsub"),
+  #     HTML("</div></div>")
+  #   )
+  # })
   
   
   #step2table----
@@ -533,37 +555,37 @@ server <- function(input, output, session) {
     req(input$topcats)
     
     #csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    this_query <- paste0("SELECT * FROM csv WHERE rowid = ", input$row)
+    this_query <- paste0("SELECT * FROM csv c, matches m WHERE c.rowid = ", input$row, " AND c.rowid = m.csv_rowid")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
     this_row <- dbGetQuery(csvinput_db, this_query)
     dbDisconnect(csvinput_db)
     
-    getty_url <- "http://vocab.getty.edu/sparql.json?query="
-    getty_query <- "select ?Subject ?Term ?Parents ?ScopeNote {
-            	          ?Subject a skos:Concept; luc:term \"%s\"; 
-            	          gvp:broaderExtended aat:%s;
-            	          skos:inScheme aat: ; 
-            	          gvp:prefLabelGVP [xl:literalForm ?Term]. 
-            	          optional {?Subject gvp:parentString ?Parents}
-            	          optional {?Subject skos:scopeNote [dct:language gvp_lang:en; rdf:value ?ScopeNote]}
-                      }"
-
-    if (length(input$subcats) == 1){
-      getty_query <- sprintf(getty_query, this_row$term, input$subcats)
-    }else{
-      if (input$topcats == "all"){
-        getty_query <- sprintf(getty_query, this_row$term, "")
-        getty_query <- stringr::str_replace(getty_query, "gvp:broaderExtended aat:;", "")
-      }else{
-        getty_query <- sprintf(getty_query, this_row$term, input$topcats)
-      }
-    }
-    
-    flog.info(paste0("Item query: ", getty_query), name = "getty")
-    
-    getty_query <- URLencode(getty_query, reserved = FALSE)
-    json <- fromJSON(paste0(getty_url, getty_query))
+    # getty_url <- "http://vocab.getty.edu/sparql.json?query="
+    # getty_query <- "select ?Subject ?Term ?Parents ?ScopeNote {
+    #         	          ?Subject a skos:Concept; luc:term \"%s\"; 
+    #         	          gvp:broaderExtended aat:%s;
+    #         	          skos:inScheme aat: ; 
+    #         	          gvp:prefLabelGVP [xl:literalForm ?Term]. 
+    #         	          optional {?Subject gvp:parentString ?Parents}
+    #         	          optional {?Subject skos:scopeNote [dct:language gvp_lang:en; rdf:value ?ScopeNote]}
+    #                   }"
+    # 
+    # if (length(input$subcats) == 1){
+    #   getty_query <- sprintf(getty_query, this_row$term, input$subcats)
+    # }else{
+    #   if (input$topcats == "all"){
+    #     getty_query <- sprintf(getty_query, this_row$term, "")
+    #     getty_query <- stringr::str_replace(getty_query, "gvp:broaderExtended aat:;", "")
+    #   }else{
+    #     getty_query <- sprintf(getty_query, this_row$term, input$topcats)
+    #   }
+    # }
+    # 
+    # flog.info(paste0("Item query: ", getty_query), name = "getty")
+    # 
+    # getty_query <- URLencode(getty_query, reserved = FALSE)
+    # json <- fromJSON(paste0(getty_url, getty_query))
     
     if (length(json$results$bindings$Subject$value) > 0){
       #Get the parent strings, remove pipes and other formatting
@@ -616,14 +638,14 @@ server <- function(input, output, session) {
     req(input$row)
     
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    has_term <- dbGetQuery(csvinput_db, paste0("SELECT aat_term, aat_id FROM csv WHERE rowid = ", input$row, " AND aat_id IS NOT NULL"))
-    dbDisconnect(csvinput_db)
-    
-    if (dim(has_term)[1] > 0){
-      output$chosen_string <- renderUI({HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for this object: ", has_term$aat_term, " (", has_term$aat_id, ")</div>"))})
-    }else{
+    # has_term <- dbGetQuery(csvinput_db, paste0("SELECT aat_term, aat_id FROM matches WHERE csv_rowid = ", input$row, " AND aat_id IS NOT NULL"))
+    # dbDisconnect(csvinput_db)
+    # 
+    # if (dim(has_term)[1] > 0){
+    #   output$chosen_string <- renderUI({HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for this object: ", has_term$aat_term, " (", has_term$aat_id, ")</div>"))})
+    # }else{
       output$chosen_string <- renderUI({HTML("&nbsp;")})
-    }
+    # }
     
     if (!is.null(input$step2table_rows_selected)){
       res <- results[input$step2table_rows_selected, ]
@@ -820,6 +842,6 @@ shinyApp(ui = ui, server = server, onStart = function() {
   onStop(function() {
     cat("Closing\n")
     try(dbDisconnect(csvinput_db), silent = TRUE)
-    try(unlink(csv_database), silent = TRUE)
+    #try(unlink(csv_database), silent = TRUE)
   })
 })

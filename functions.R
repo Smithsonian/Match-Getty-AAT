@@ -5,6 +5,9 @@ find_aat <- function(which_row){
   library(stringr)
   library(jsonlite)
   library(futile.logger)
+  library(RPostgres)
+  library(tokenizers)
+  library(stopwords)
   
   this_row <- all_rows[which_row,]
   
@@ -24,7 +27,7 @@ find_aat <- function(which_row){
     
     #Replace search string in query, also remove single quotes
     getty_query <- sprintf(getty_query, stringr::str_replace_all(this_row$linked_aat_term, "'", ""))
-    flog.info(paste0("Item query: ", getty_query), name = "getty")
+    flog.info(paste0("Item query: ", getty_query), name = "parallel")
     
     #URLEncode the query
     getty_query <- URLencode(getty_query, reserved = FALSE)
@@ -33,9 +36,18 @@ find_aat <- function(which_row){
     
     if (length(json$results$bindings) != 0){
       aat_id <- paste0("aat:", stringr::str_replace(json$results$bindings$subj$value, "http://vocab.getty.edu/aat/", ""))
-      scopenote <- stringr::str_replace(json$results$bindings$ScopeNote$value, "'", "''")
+      scopenote <- stringr::str_replace_all(json$results$bindings$ScopeNote$value, "'", "''")
 
-      return(list("aat_term" = this_row$linked_aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = this_row$linked_aat_term, "aat_note" = scopenote))
+      #return(list("aat_term" = this_row$linked_aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = this_row$linked_aat_term, "aat_note" = scopenote))
+      
+      # #Open db
+      # csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+      # this_query <- paste0("INSERT INTO matches (csv_rowid, aat_term, aat_id, aat_note) SELECT rowid, '", this_row$linked_aat_term, "', '", aat_id, "', '", scopenote, "' FROM csv WHERE term = '", stringr::str_replace_all(this_row$term, "'", "''"), "' AND keywords = '", this_row$keywords, "' AND linked_aat_term = '", this_row$linked_aat_term,"'")
+      # flog.info(paste0("this_query: ", this_query), name = "parallel")
+      # n <- dbSendQuery(csvinput_db, this_query)
+      # #Close db
+      # dbDisconnect(csvinput_db)
+      return(list("csv_rowid" = this_row$rowid, "aat_term" = this_row$linked_aat_term, "aat_id" = aat_id, "aat_note" = scopenote))
     }
   }
   
@@ -52,7 +64,7 @@ find_aat <- function(which_row){
   #Replace search string in query, also remove single quotes
   getty_query <- sprintf(getty_query, stringr::str_replace_all(this_row$term, "'", ""))
   
-  flog.info(paste0("Item query: ", getty_query), name = "getty")
+  flog.info(paste0("Item query: ", getty_query), name = "parallel")
   
   #URLEncode the query
   getty_query <- URLencode(getty_query, reserved = FALSE)
@@ -68,11 +80,20 @@ find_aat <- function(which_row){
     }
     names(results) <- c("subject", "term", "aat_note")
     aat_term <- results$term
-    aat_term <- stringr::str_replace(aat_term, "'", "''")
+    aat_term <- stringr::str_replace_all(aat_term, "'", "''")
     aat_id <- paste0("aat:", stringr::str_replace(results$subject, "http://vocab.getty.edu/aat/", ""))
-    scopenote <- stringr::str_replace(results$aat_note, "'", "''")
+    scopenote <- stringr::str_replace_all(results$aat_note, "'", "''")
     
-    return(list("aat_term" = aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = NA, "aat_note" = scopenote))
+    #return(list("aat_term" = aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = NA, "aat_note" = scopenote))
+    
+    #Open db
+    # csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+    # this_query <- paste0("INSERT INTO matches (csv_rowid, aat_term, aat_id, aat_note) SELECT rowid, '", aat_term, "', '", aat_id, "', '", scopenote, "' FROM csv WHERE term = '", stringr::str_replace_all(this_row$term, "'", "''"), "' AND keywords = '", this_row$keywords, "' AND linked_aat_term = NULL")
+    # flog.info(paste0("this_query: ", this_query), name = "parallel")
+    # n <- dbSendQuery(csvinput_db, this_query)
+    # #Close db
+    # dbDisconnect(csvinput_db)
+    return(list("csv_rowid" = this_row$rowid, "aat_term" = aat_term, "aat_id" = aat_id, "aat_note" = scopenote))
   }else{
     #Found more than one, try full text
     getty_query <- "select 
@@ -93,44 +114,60 @@ find_aat <- function(which_row){
     string_to_find <- stringr::str_replace_all(string_to_find, ",", "")
     string_to_find <- stringr::str_replace_all(string_to_find, ";", "")
     string_to_find <- stringr::str_split(string_to_find, " ")[[1]]
+    string_formatted <- paste0(string_to_find, collapse = " AND ")
     
-    #Add wildcard to each word
-    string_to_find <- paste0(string_to_find, '*')
+    #Parse keywords
+    keywords_tokenized <- tokenizers::tokenize_words(this_row$keywords, stopwords = stopwords::stopwords("en"))[[1]]
     
-    #Join words with AND
-    string_to_find <- paste0(string_to_find, collapse = " AND ")
-    
-    #Replace search string in query
-    getty_query <- sprintf(getty_query, string_to_find)
-    
-    flog.info(paste0("Item query: ", getty_query), name = "getty")
-    
-    #URLencode the query
-    getty_query <- URLencode(getty_query, reserved = FALSE)
-    
-    json <- fromJSON(paste0(getty_url, getty_query))
-    
-    df_results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$Parents$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
-    
-    if (dim(df_results)[1] > 0){
-      names(df_results) <- c("subject", "term", "parents", "aat_note")
+    for (t in seq(1, length(keywords_tokenized))){
+      #Join words with AND
+      string_to_query <- paste0(string_formatted, " AND ", keywords_tokenized[t])
       
-      if (!is.na(this_row$keywords) && dim(df_results)[1] != 1){
-        results <- df_results %>% dplyr::filter(stringr::str_detect(aat_note, this_row$keywords))
+      #Replace search string in query
+      getty_query_ready <- sprintf(getty_query, string_to_query)
+      
+      flog.info(paste0("Item query: ", getty_query_ready), name = "parallel")
+      
+      #URLencode the query
+      getty_query_ready <- URLencode(getty_query_ready, reserved = FALSE)
+      
+      json <- fromJSON(paste0(getty_url, getty_query_ready))
+      
+      df_results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$Parents$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
+      
+      results = data.frame(matrix(nrow = 0, ncol = 4, data = NA))
+      
+      if (dim(df_results)[1] > 0){
+        names(df_results) <- c("subject", "term", "parents", "aat_note")
+        
+        #Open db
+        #csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+        
+        for (r in seq(1, dim(df_results)[1])){
+          # this_query <- paste0("INSERT INTO matches (csv_rowid, aat_term, aat_id, aat_note, aat_parents) SELECT rowid, '", stringr::str_replace_all(df_results$term[r], "'", "''"), "', '", df_results$subject[r], "', '", stringr::str_replace_all(df_results$aat_note[r], "'", "''"), "', '", df_results$parents[r], "' FROM csv WHERE term = '", stringr::str_replace(this_row$term, "'", "''"), "' AND keywords = '", this_row$keywords, "' AND linked_aat_term = '", this_row$linked_aat_term[r], "'")
+          # flog.info(paste0("this_query: ", this_query), name = "parallel")
+          # n <- dbSendQuery(csvinput_db, this_query)
+          # n <- dbClearResult(n)
+          results <- rbind(results, 
+                           cbind(
+                             this_row$rowid, 
+                             stringr::str_replace_all(df_results$term[r], "'", "''"),
+                             paste0("aat:", stringr::str_replace(df_results$subject[r], "http://vocab.getty.edu/aat/", "")),
+                             stringr::str_replace_all(df_results$aat_note[r], "'", "''")
+                             )
+                           )
+        }
+        
+        # #Close db
+        # dbDisconnect(csvinput_db)
       }else{
-        results <- df_results
-      }
-      
-      if (dim(results)[1] == 1){
-        aat_term <- results$term
-        aat_term <- stringr::str_replace(aat_term, "'", "''")
-        aat_id <- paste0("aat:", stringr::str_replace(results$subject, "http://vocab.getty.edu/aat/", ""))
-        scopenote <- stringr::str_replace(results$aat_note, "'", "''")
-        return(list("aat_term" = aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = this_row$linked_aat_term, "aat_note" = scopenote))
+        return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
       }
     }
+    names(results) = c("csv_rowid", "aat_term", "aat_id", "aat_note")
+    return(results)
   }
-  return(list("aat_term" = NA, "aat_id" = NA, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = this_row$linked_aat_term, "aat_note" = NA))
+  return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
 }
 
 
@@ -144,20 +181,11 @@ csv_to_sqlite <- function(csv_database, csvinput){
   #Write data to table "csv"
   dbWriteTable(csvinput_db, "csv", csvinput, overwrite = TRUE)
   
-  #Add app columns to the table
-  n <- dbExecute(csvinput_db, "ALTER TABLE csv ADD COLUMN aat_term TEXT;")
-  n <- dbExecute(csvinput_db, "ALTER TABLE csv ADD COLUMN aat_id TEXT;")
-  n <- dbExecute(csvinput_db, "ALTER TABLE csv ADD COLUMN aat_note TEXT;")
-  
   #Index columns used for searching
-  n <- dbExecute(csvinput_db, "CREATE INDEX id_aat_id ON csv(aat_id);")
   n <- dbExecute(csvinput_db, "CREATE INDEX id_index ON csv(id);")
   n <- dbExecute(csvinput_db, "CREATE INDEX id_term ON csv(term);")
   
-  #Add table for keywords
-  n <- dbExecute(csvinput_db, "CREATE TABLE keywords (csv_rowid integer, aat_id integer);")
-  n <- dbExecute(csvinput_db, "CREATE INDEX keywords_csv_rowid_idx ON keywords(csv_rowid);")
-  n <- dbExecute(csvinput_db, "CREATE INDEX keywords_aat_id_idx ON keywords(aat_id);")
+  
   
   #Close file
   dbDisconnect(csvinput_db)
