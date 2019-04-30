@@ -16,13 +16,12 @@ library(openxlsx)
 
 #Settings----
 app_name <- "Match Getty AAT"
-app_ver <- "0.4.0"
+app_ver <- "0.5.0"
 github_link <- "https://github.com/Smithsonian/Match-Getty-AAT"
-csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d_%H%M%S_"), (runif(1) * 10000000), ".sqlite3")
+csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d_%H%M%S_"), (runif(1) * 10000), ".sqlite3")
 options(stringsAsFactors = FALSE)
 options(encoding = 'UTF-8')
-#Logfile
-logfile <- paste0("logs/", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
+
 #load functions
 source("functions.R")
 
@@ -44,7 +43,7 @@ ui <- fluidPage(
                   uiOutput("steps")
            ),
            column(width = 4, 
-                  uiOutput("loadcsv"),
+                  uiOutput("uploadcsv"),
                   uiOutput("error_msg"),
                   uiOutput("inputfile")
            )
@@ -103,10 +102,11 @@ ui <- fluidPage(
 
 
 
-#Server----
+
 server <- function(input, output, session) {
   
   #Setup Logging
+  logfile <- paste0("logs/", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
   dir.create('logs', showWarnings = FALSE)
   flog.logger("getty", INFO, appender=appender.file(logfile))
   
@@ -183,8 +183,8 @@ server <- function(input, output, session) {
   
   
   
-  #loadcsv ----
-  output$loadcsv <- renderUI({
+  #uploadcsv ----
+  output$uploadcsv <- renderUI({
     if (is.null(input$csvinput)){
       tagList(
         fileInput("csvinput", "Upload an Input File",
@@ -342,14 +342,15 @@ server <- function(input, output, session) {
     
     #Add table of results
     dbWriteTable(csvinput_db, "matches", res_df, overwrite = TRUE)
-    n <- dbExecute(csvinput_db, "CREATE INDEX matches_csv_rowid_idx ON matches(csv_rowid);")
-    n <- dbExecute(csvinput_db, "CREATE INDEX matches_aat_id_idx ON matches(aat_id);")
-    n <- dbExecute(csvinput_db, "CREATE INDEX matches_aat_term_idx ON matches(aat_term);")
+    n <- dbExecute(csvinput_db, "CREATE INDEX matches_csv_rowid_idx ON matches(csv_rowid)")
+    n <- dbExecute(csvinput_db, "CREATE INDEX matches_aat_id_idx ON matches(aat_id)")
+    n <- dbExecute(csvinput_db, "CREATE INDEX matches_aat_term_idx ON matches(aat_term)")
+    n <- dbExecute(csvinput_db, "ALTER TABLE matches ADD COLUMN selected INTEGER DEFAULT 0")
     
-    #progress0$close()
+    n <- dbExecute(csvinput_db, "UPDATE matches SET selected = 1 WHERE csv_rowid in (SELECT c.rowid FROM csv c LEFT JOIN (SELECT csv_rowid, COUNT(*) AS no_matches FROM matches GROUP BY csv_rowid) m1 ON c.rowid = m1.csv_rowid WHERE no_matches = 1)")
     
     #Get fresh version of table to display
-    this_query <- paste0("SELECT c.rowid, c.*, m.*, REPLACE(aat_id, 'aat:', '') aat_id_int, COALESCE(m1.no_matches, 0) as no_matches, COALESCE(m1.no_matches, 0) as 'Number of matches' FROM csv c LEFT JOIN (SELECT csv_rowid, COUNT(*) AS no_matches FROM matches GROUP BY csv_rowid) m1 ON c.rowid = m1.csv_rowid LEFT JOIN matches m ON m1.csv_rowid = m.csv_rowid AND (m1.no_matches == 1 OR m1.no_matches IS NULL)")
+    this_query <- paste0("SELECT c.rowid, c.*, m.*, REPLACE(m.aat_id, 'aat:', '') as aat_id_int, COALESCE(m1.no_matches, 0) as no_matches, COALESCE(m1.no_matches, 0) as 'Number of matches' FROM csv c LEFT JOIN (SELECT csv_rowid, COUNT(*) AS no_matches FROM matches GROUP BY csv_rowid) m1 ON c.rowid = m1.csv_rowid LEFT JOIN matches m ON m1.csv_rowid = m.csv_rowid AND (m1.no_matches == 1 OR m1.no_matches IS NULL)")
     flog.info(paste0("this_query: ", this_query), name = "locations")
     resultsdf1 <- dbGetQuery(csvinput_db, this_query)
     
@@ -371,7 +372,7 @@ server <- function(input, output, session) {
     results_table <- dplyr::select(results_table, -aat_id)
     results_table <- dplyr::select(results_table, -aat_id_int)
     results_table <- dplyr::select(results_table, -no_matches)
-    #results_table <- dplyr::rename(results_table, aat_id = aat_id_int)
+    results_table <- dplyr::select(results_table, -selected)
     
     no_cols <- dim(results_table)[2]
     
@@ -431,7 +432,7 @@ server <- function(input, output, session) {
               <h3 class=\"panel-title\">Could not find a single match</h3> 
             </div> 
             <div class=\"panel-body\">
-              <p>The app could not find a single match for this row automatically.</p>
+              <p>The app found many possible matches for this row automatically.</p>
               <p>In <code>Step 2</code> you can select the best match manually.</p>
             </div>
           </div>")
@@ -552,13 +553,13 @@ server <- function(input, output, session) {
   output$step2table <- DT::renderDataTable({
     req(input$csvinput)
     req(input$row)
-    req(input$topcats)
+    #req(input$topcats)
     
     #csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    this_query <- paste0("SELECT * FROM csv c, matches m WHERE c.rowid = ", input$row, " AND c.rowid = m.csv_rowid")
+    this_query <- paste0("SELECT * FROM matches WHERE csv_rowid = ", input$row)
     flog.info(paste0("this_query: ", this_query), name = "locations")
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    this_row <- dbGetQuery(csvinput_db, this_query)
+    results <<- dbGetQuery(csvinput_db, this_query)
     dbDisconnect(csvinput_db)
     
     # getty_url <- "http://vocab.getty.edu/sparql.json?query="
@@ -586,36 +587,39 @@ server <- function(input, output, session) {
     # 
     # getty_query <- URLencode(getty_query, reserved = FALSE)
     # json <- fromJSON(paste0(getty_url, getty_query))
+    # 
+    # if (length(json$results$bindings$Subject$value) > 0){
+    #   #Get the parent strings, remove pipes and other formatting
+    #   parents_strings <- str_replace_all(string = json$results$bindings$Parents$value, pattern = ">", replacement = "")
+    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "<", replacement = "|")
+    #   parents_strings <- str_replace_all(string = parents_strings, pattern = ", ", replacement = "|")
+    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[|][|]", replacement = "|")
+    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[||]", replacement = "|")
+    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[ ][)]", replacement = ")")
+    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[|]", replacement = "|")
+    #   
+    #   for (p in 1:length(parents_strings)){
+    #     parent_string <- parents_strings[p]
+    #     parent_string_split <- stringr::str_split(parent_string, '[|]')[[1]]
+    #     parent_string_split_ordered <- rev(parent_string_split)
+    #     p_string <- parent_string_split_ordered
+    #     p_string <- p_string[p_string != ""]
+    #     for (s in 2:length(p_string)){
+    #       p_string[s] <- paste0(paste0(rep('.', s - 1), collapse = ""), " ", p_string[s], collapse = "")
+    #     }
+    #     parents_strings[p] <- paste(p_string, collapse = "<br>")
+    #   }
+      
+      #results <<- data.frame(id = str_replace(string = json$results$bindings$Subject$value, pattern = "http://vocab.getty.edu/aat/", replacement = ""), term = json$results$bindings$Term$value, parents = parents_strings, note = json$results$bindings$ScopeNote$value)
+    #   
+    #   results_table <- dplyr::select(results, -1)
+    # }else{
+    #   results <<- data.frame(id = NA, term = NA, parents = NA, note = NA)
+    #   results_table <- dplyr::select(results, -1)
+    # }
     
-    if (length(json$results$bindings$Subject$value) > 0){
-      #Get the parent strings, remove pipes and other formatting
-      parents_strings <- str_replace_all(string = json$results$bindings$Parents$value, pattern = ">", replacement = "")
-      parents_strings <- str_replace_all(string = parents_strings, pattern = "<", replacement = "|")
-      parents_strings <- str_replace_all(string = parents_strings, pattern = ", ", replacement = "|")
-      parents_strings <- str_replace_all(string = parents_strings, pattern = "[|][|]", replacement = "|")
-      parents_strings <- str_replace_all(string = parents_strings, pattern = "[||]", replacement = "|")
-      parents_strings <- str_replace_all(string = parents_strings, pattern = "[ ][)]", replacement = ")")
-      parents_strings <- str_replace_all(string = parents_strings, pattern = "[|]", replacement = "|")
-      
-      for (p in 1:length(parents_strings)){
-        parent_string <- parents_strings[p]
-        parent_string_split <- stringr::str_split(parent_string, '[|]')[[1]]
-        parent_string_split_ordered <- rev(parent_string_split)
-        p_string <- parent_string_split_ordered
-        p_string <- p_string[p_string != ""]
-        for (s in 2:length(p_string)){
-          p_string[s] <- paste0(paste0(rep('.', s - 1), collapse = ""), " ", p_string[s], collapse = "")
-        }
-        parents_strings[p] <- paste(p_string, collapse = "<br>")
-      }
-      
-      results <<- data.frame(id = str_replace(string = json$results$bindings$Subject$value, pattern = "http://vocab.getty.edu/aat/", replacement = ""), term = json$results$bindings$Term$value, parents = parents_strings, note = json$results$bindings$ScopeNote$value)
-      
-      results_table <- dplyr::select(results, -1)
-    }else{
-      results <<- data.frame(id = NA, term = NA, parents = NA, note = NA)
-      results_table <- dplyr::select(results, -1)
-    }
+    results_table <- dplyr::select(results, -csv_rowid)
+    results_table <- dplyr::select(results_table, -selected)
     
     DT::datatable(results_table, 
                   escape = FALSE, 
@@ -627,7 +631,7 @@ server <- function(input, output, session) {
                   ), 
                   rownames = FALSE, 
                   selection = 'single',
-                  caption = "Select a subject to match") %>% formatStyle("parents", "white-space" = "nowrap") %>% formatStyle("term", "white-space" = "nowrap")
+                  caption = "Select a subject to match") #%>% formatStyle("parents", "white-space" = "nowrap") %>% formatStyle("term", "white-space" = "nowrap")
 
   })
   
@@ -638,16 +642,17 @@ server <- function(input, output, session) {
     req(input$row)
     
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    # has_term <- dbGetQuery(csvinput_db, paste0("SELECT aat_term, aat_id FROM matches WHERE csv_rowid = ", input$row, " AND aat_id IS NOT NULL"))
-    # dbDisconnect(csvinput_db)
-    # 
-    # if (dim(has_term)[1] > 0){
-    #   output$chosen_string <- renderUI({HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for this object: ", has_term$aat_term, " (", has_term$aat_id, ")</div>"))})
-    # }else{
+    has_term <- dbGetQuery(csvinput_db, paste0("SELECT aat_term, aat_id FROM matches WHERE csv_rowid = ", input$row, " AND selected = 1"))
+    dbDisconnect(csvinput_db)
+
+    if (dim(has_term)[1] > 0){
+      output$chosen_string <- renderUI({HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for this object: ", has_term$aat_term, " (", has_term$aat_id, ")</div>"))})
+    }else{
       output$chosen_string <- renderUI({HTML("&nbsp;")})
-    # }
+    }
     
     if (!is.null(input$step2table_rows_selected)){
+      
       res <- results[input$step2table_rows_selected, ]
       
       AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
@@ -656,20 +661,20 @@ server <- function(input, output, session) {
       this_row <- dbGetQuery(csvinput_db, paste0("SELECT * FROM csv WHERE rowid = ", input$row))
       this_row_term <- this_row$term
       this_row_id <- this_row$id
-      row_count <- dbGetQuery(csvinput_db, paste0("SELECT count(*) AS no_rows FROM csv WHERE aat_id IS NULL AND term = '", this_row_term, "'"))
+      #row_count <- dbGetQuery(csvinput_db, paste0("SELECT count(*) AS no_rows FROM csv WHERE aat_id IS NULL AND term = '", this_row_term, "'"))
       
       dbDisconnect(csvinput_db)
       
       tagList(
         HTML("<div class=\"panel panel-success\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Result selected</h3> </div> <div class=\"panel-body\">"),
-        HTML(paste0("<dl class=\"dl-horizontal\"><dt>ID</dt><dd>", this_row_id, "</dd><dt>Term</dt><dd>", res$term, "</dd><dt>AAT ID</dt><dd>", res$id)),
+        HTML(paste0("<dl class=\"dl-horizontal\"><dt>ID</dt><dd>", this_row_id, "</dd><dt>Term</dt><dd>", res$aat_term, "</dd><dt>AAT ID</dt><dd>", res$aat_id)),
         actionLink("showaat", label = "", icon = icon("info-sign", lib = "glyphicon"), title = "AAT page for this term", alt = "AAT page for this term"),
         HTML("</dd></dl></p>"),
         # Save button
         actionButton("saverow", paste0("Save this AAT term for item ID ", this_row_id), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon")),
-        br(),
-        br(),
-        if (row_count$no_rows > 1){actionButton("saverowall", paste0("Save this AAT term for the ", row_count$no_rows, " rows with term: ", this_row_term), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon"))},
+        # br(),
+        # br(),
+        # if (row_count$no_rows > 1){actionButton("saverowall", paste0("Save this AAT term for the ", row_count$no_rows, " rows with term: ", this_row_term), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon"))},
         HTML("</div></div>")
       )
     }else{
@@ -732,37 +737,38 @@ server <- function(input, output, session) {
     selected_row <- results[input$step2table_rows_selected, ]
     
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    query <- paste0("UPDATE csv SET aat_id = 'aat:", selected_row[1], "', aat_term = '", selected_row[2], "', aat_note = '", selected_row[4], "' WHERE rowid = ", input$row)
+    query <- paste0("UPDATE matches SET selected = 1 WHERE csv_rowid = ", input$row, " AND aat_id = '", selected_row$aat_id, "'")
     flog.info(paste0("update query: ", query), name = "getty")
     n <- dbExecute(csvinput_db, query)
     dbDisconnect(csvinput_db)
     output$chosen_string <- renderUI({
-      HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for this object: ", selected_row[2], " (", selected_row[1], ")</div>"))
+      HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for this object: ", selected_row$aat_term, " (", selected_row$aat_id, ")</div>"))
     })
   })
   
   
   #saverowall, observe----
-  observeEvent(input$saverowall, {
-    req(input$csvinput)
-    req(input$row)
-    req(input$step2table_rows_selected)
-    
-    selected_row <- results[input$step2table_rows_selected, ]
-    
-    csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    this_row_term <- dbGetQuery(csvinput_db, paste0("SELECT term from csv WHERE rowid = ", input$row))
-    query <- paste0("UPDATE csv SET aat_id = 'aat:", selected_row[1], "', aat_term = '", selected_row[2], "', aat_note = '", selected_row[3], "' WHERE term = '", this_row_term, "' AND aat_id IS NULL")
-    flog.info(paste0("update query: ", query), name = "getty")
-    n <- dbExecute(csvinput_db, query)
-    dbDisconnect(csvinput_db)
-    output$chosen_string <- renderUI({
-      HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for objects with term: ", this_row_term, "</div>"))
-    })
-  })
+  # observeEvent(input$saverowall, {
+  #   req(input$csvinput)
+  #   req(input$row)
+  #   req(input$step2table_rows_selected)
+  #   
+  #   selected_row <- results[input$step2table_rows_selected, ]
+  #   
+  #   csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+  #   this_row_term <- dbGetQuery(csvinput_db, paste0("SELECT term from csv WHERE rowid = ", input$row))
+  #   query <- paste0("UPDATE csv SET aat_id = 'aat:", selected_row[1], "', aat_term = '", selected_row[2], "', aat_note = '", selected_row[3], "' WHERE term = '", this_row_term, "' AND aat_id IS NULL")
+  #   flog.info(paste0("update query: ", query), name = "getty")
+  #   n <- dbExecute(csvinput_db, query)
+  #   dbDisconnect(csvinput_db)
+  #   output$chosen_string <- renderUI({
+  #     HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for objects with term: ", this_row_term, "</div>"))
+  #   })
+  # })
   
   
   #downloadcsv1----
+  #Download CSV
   output$downloadcsv1 <- downloadHandler(
     #Downloadable csv of results
     filename = function() {
@@ -770,7 +776,7 @@ server <- function(input, output, session) {
     },
     content = function(file) {
       csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-      data <- dbGetQuery(csvinput_db, "SELECT * FROM csv")
+      data <- dbGetQuery(csvinput_db, "SELECT c.*, m.aat_id, aat_term, aat_note FROM csv c LEFT JOIN matches m ON c.rowid = m.csv_rowid and m.selected = 1")
       dbDisconnect(csvinput_db)
       
       #Drop unused columns
@@ -781,18 +787,19 @@ server <- function(input, output, session) {
         data <- dplyr::select(data, -linked_aat_term)
       }
       
-      write.csv(data, file, row.names = FALSE)
+      write.csv(data, file, quote = TRUE, na = "", row.names = FALSE)
     }
   )
   
   
   #downloadcsv2----
+  #Download XLSX
   output$downloadcsv2 <- downloadHandler(
     filename = function(){paste0("results_aat_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")},
     
     content = function(file){
       csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-      data <- dbGetQuery(csvinput_db, "SELECT * FROM csv")
+      data <- dbGetQuery(csvinput_db, "SELECT c.*, m.aat_id, aat_term, aat_note FROM csv c LEFT JOIN matches m ON c.rowid = m.csv_rowid and m.selected = 1")
       dbDisconnect(csvinput_db)
       
       #Drop unused columns
@@ -842,6 +849,6 @@ shinyApp(ui = ui, server = server, onStart = function() {
   onStop(function() {
     cat("Closing\n")
     try(dbDisconnect(csvinput_db), silent = TRUE)
-    #try(unlink(csv_database), silent = TRUE)
+    try(unlink(csv_database), silent = TRUE)
   })
 })

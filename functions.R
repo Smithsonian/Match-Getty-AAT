@@ -38,15 +38,6 @@ find_aat <- function(which_row){
       aat_id <- paste0("aat:", stringr::str_replace(json$results$bindings$subj$value, "http://vocab.getty.edu/aat/", ""))
       scopenote <- stringr::str_replace_all(json$results$bindings$ScopeNote$value, "'", "''")
 
-      #return(list("aat_term" = this_row$linked_aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = this_row$linked_aat_term, "aat_note" = scopenote))
-      
-      # #Open db
-      # csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-      # this_query <- paste0("INSERT INTO matches (csv_rowid, aat_term, aat_id, aat_note) SELECT rowid, '", this_row$linked_aat_term, "', '", aat_id, "', '", scopenote, "' FROM csv WHERE term = '", stringr::str_replace_all(this_row$term, "'", "''"), "' AND keywords = '", this_row$keywords, "' AND linked_aat_term = '", this_row$linked_aat_term,"'")
-      # flog.info(paste0("this_query: ", this_query), name = "parallel")
-      # n <- dbSendQuery(csvinput_db, this_query)
-      # #Close db
-      # dbDisconnect(csvinput_db)
       return(list("csv_rowid" = this_row$rowid, "aat_term" = this_row$linked_aat_term, "aat_id" = aat_id, "aat_note" = scopenote))
     }
   }
@@ -84,15 +75,6 @@ find_aat <- function(which_row){
     aat_id <- paste0("aat:", stringr::str_replace(results$subject, "http://vocab.getty.edu/aat/", ""))
     scopenote <- stringr::str_replace_all(results$aat_note, "'", "''")
     
-    #return(list("aat_term" = aat_term, "aat_id" = aat_id, "term" = stringr::str_replace(this_row$term, "'", "''"), "keywords" = this_row$keywords, "linked_aat_term" = NA, "aat_note" = scopenote))
-    
-    #Open db
-    # csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-    # this_query <- paste0("INSERT INTO matches (csv_rowid, aat_term, aat_id, aat_note) SELECT rowid, '", aat_term, "', '", aat_id, "', '", scopenote, "' FROM csv WHERE term = '", stringr::str_replace_all(this_row$term, "'", "''"), "' AND keywords = '", this_row$keywords, "' AND linked_aat_term = NULL")
-    # flog.info(paste0("this_query: ", this_query), name = "parallel")
-    # n <- dbSendQuery(csvinput_db, this_query)
-    # #Close db
-    # dbDisconnect(csvinput_db)
     return(list("csv_rowid" = this_row$rowid, "aat_term" = aat_term, "aat_id" = aat_id, "aat_note" = scopenote))
   }else{
     #Found more than one, try full text
@@ -119,12 +101,11 @@ find_aat <- function(which_row){
     #Parse keywords
     keywords_tokenized <- tokenizers::tokenize_words(this_row$keywords, stopwords = stopwords::stopwords("en"))[[1]]
     
-    for (t in seq(1, length(keywords_tokenized))){
-      #Join words with AND
-      string_to_query <- paste0(string_formatted, " AND ", keywords_tokenized[t])
+    if (length(keywords_tokenized) == 1 && is.na(keywords_tokenized)){
       
+      #No keywords
       #Replace search string in query
-      getty_query_ready <- sprintf(getty_query, string_to_query)
+      getty_query_ready <- sprintf(getty_query, string_formatted)
       
       flog.info(paste0("Item query: ", getty_query_ready), name = "parallel")
       
@@ -133,39 +114,64 @@ find_aat <- function(which_row){
       
       json <- fromJSON(paste0(getty_url, getty_query_ready))
       
-      df_results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$Parents$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
+      df_results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
       
       results = data.frame(matrix(nrow = 0, ncol = 4, data = NA))
       
       if (dim(df_results)[1] > 0){
-        names(df_results) <- c("subject", "term", "parents", "aat_note")
-        
-        #Open db
-        #csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
+        names(df_results) <- c("subject", "term", "aat_note")
         
         for (r in seq(1, dim(df_results)[1])){
-          # this_query <- paste0("INSERT INTO matches (csv_rowid, aat_term, aat_id, aat_note, aat_parents) SELECT rowid, '", stringr::str_replace_all(df_results$term[r], "'", "''"), "', '", df_results$subject[r], "', '", stringr::str_replace_all(df_results$aat_note[r], "'", "''"), "', '", df_results$parents[r], "' FROM csv WHERE term = '", stringr::str_replace(this_row$term, "'", "''"), "' AND keywords = '", this_row$keywords, "' AND linked_aat_term = '", this_row$linked_aat_term[r], "'")
-          # flog.info(paste0("this_query: ", this_query), name = "parallel")
-          # n <- dbSendQuery(csvinput_db, this_query)
-          # n <- dbClearResult(n)
           results <- rbind(results, 
                            cbind(
                              this_row$rowid, 
                              stringr::str_replace_all(df_results$term[r], "'", "''"),
                              paste0("aat:", stringr::str_replace(df_results$subject[r], "http://vocab.getty.edu/aat/", "")),
                              stringr::str_replace_all(df_results$aat_note[r], "'", "''")
-                             )
                            )
+          )
         }
+      }
+    }else{
+      for (t in seq(1, length(keywords_tokenized))){
+        #Join words with AND
+        string_to_query <- paste0(string_formatted, " AND ", keywords_tokenized[t])
         
-        # #Close db
-        # dbDisconnect(csvinput_db)
-      }else{
-        return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
+        #Replace search string in query
+        getty_query_ready <- sprintf(getty_query, string_to_query)
+        
+        flog.info(paste0("Item query: ", getty_query_ready), name = "parallel")
+        
+        #URLencode the query
+        getty_query_ready <- URLencode(getty_query_ready, reserved = FALSE)
+        
+        json <- fromJSON(paste0(getty_url, getty_query_ready))
+        
+        df_results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$Parents$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
+        
+        results = data.frame(matrix(nrow = 0, ncol = 4, data = NA))
+        
+        if (dim(df_results)[1] > 0){
+          names(df_results) <- c("subject", "term", "parents", "aat_note")
+          
+          for (r in seq(1, dim(df_results)[1])){
+            results <- rbind(results, 
+                             cbind(
+                               this_row$rowid, 
+                               stringr::str_replace_all(df_results$term[r], "'", "''"),
+                               paste0("aat:", stringr::str_replace(df_results$subject[r], "http://vocab.getty.edu/aat/", "")),
+                               stringr::str_replace_all(df_results$aat_note[r], "'", "''")
+                             )
+            )
+          }
+        }else{
+          return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
+        }
       }
     }
+    
     names(results) = c("csv_rowid", "aat_term", "aat_id", "aat_note")
-    return(results)
+    return(as.list(results))
   }
   return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
 }
