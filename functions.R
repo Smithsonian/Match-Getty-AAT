@@ -14,6 +14,8 @@ find_aat <- function(which_row){
   flog.logger("parallel", INFO, appender=appender.file(logfile))
   getty_url <- "http://vocab.getty.edu/sparql.json?query="
   
+  flog.info(paste0("which_row: ", which_row), name = "parallel")
+  
   if (!is.na(this_row$linked_aat_term)){
     getty_query <- "select 
                       ?subj ?ScopeNote 
@@ -32,7 +34,12 @@ find_aat <- function(which_row){
     #URLEncode the query
     getty_query <- URLencode(getty_query, reserved = FALSE)
     
-    json <- fromJSON(paste0(getty_url, getty_query))
+    error_check <- try(json <- fromJSON(paste0(getty_url, getty_query)), silent = TRUE)
+    
+    if (class(error_check) == "try-error"){
+      flog.error(paste0("AAT query failed: (", this_row$rowid, ") ", paste0(getty_url, getty_query)), name = "parallel")
+      return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
+    }
     
     if (length(json$results$bindings) != 0){
       aat_id <- paste0("aat:", stringr::str_replace(json$results$bindings$subj$value, "http://vocab.getty.edu/aat/", ""))
@@ -59,7 +66,13 @@ find_aat <- function(which_row){
   
   #URLEncode the query
   getty_query <- URLencode(getty_query, reserved = FALSE)
-  json <- fromJSON(paste0(getty_url, getty_query))
+  
+  error_check <- try(json <- fromJSON(paste0(getty_url, getty_query)), silent = TRUE)
+  
+  if (class(error_check) == "try-error"){
+    flog.error(paste0("AAT query failed: (", this_row$rowid, ") ", paste0(getty_url, getty_query)), name = "parallel")
+    return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
+  }
   
   results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
   
@@ -112,7 +125,12 @@ find_aat <- function(which_row){
       #URLencode the query
       getty_query_ready <- URLencode(getty_query_ready, reserved = FALSE)
       
-      json <- fromJSON(paste0(getty_url, getty_query_ready))
+      error_check <- try(json <- fromJSON(paste0(getty_url, getty_query_ready)), silent = TRUE)
+      
+      if (class(error_check) == "try-error"){
+        flog.error(paste0("AAT query failed: (", this_row$rowid, ") ", paste0(getty_url, getty_query_ready)), name = "parallel")
+        return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
+      }
       
       df_results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
       
@@ -145,7 +163,12 @@ find_aat <- function(which_row){
         #URLencode the query
         getty_query_ready <- URLencode(getty_query_ready, reserved = FALSE)
         
-        json <- fromJSON(paste0(getty_url, getty_query_ready))
+        error_check <- try(json <- fromJSON(paste0(getty_url, getty_query_ready)), silent = TRUE)
+        
+        if (class(error_check) == "try-error"){
+          flog.error(paste0("AAT query failed: (", this_row$rowid, ") ", paste0(getty_url, getty_query_ready)), name = "parallel")
+          return(list("csv_rowid" = this_row$rowid, "aat_term" = NA, "aat_id" = NA, "aat_note" = NA))
+        }
         
         df_results <- as.data.frame(cbind(json$results$bindings$Subject$value, json$results$bindings$Term$value, json$results$bindings$Parents$value, json$results$bindings$ScopeNote$value), stringsAsFactors = FALSE)
         

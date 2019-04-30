@@ -22,6 +22,12 @@ csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d_%H%M%S_"), (runif
 options(stringsAsFactors = FALSE)
 options(encoding = 'UTF-8')
 
+#How many parallel queries to run, 
+# too many will cause errors
+# 4 seems to work fine
+no_cores <- 4
+
+
 #load functions
 source("functions.R")
 
@@ -58,26 +64,19 @@ ui <- fluidPage(
          )
       ),
       tabPanel("Step 2 - Manual Matching",
-         br(),
-         #fluidRow(
-           #column(width = 10, 
-                  fluidRow(
-                    column(width = 4, 
-                           br(),
-                           uiOutput("step1_msg"),
-                           uiOutput("choose_string"),
-                           uiOutput("chosen_string")
-                    ),
-                    column(width = 8,
-                           uiOutput("step2detail")
-                    )
-                  ),
-                  DT::dataTableOutput("step2table")
-           #)
-           # column(width = 2,
-           #        uiOutput("topcategories")
-           # )
-         #)
+          br(),
+          fluidRow(
+            column(width = 4, 
+                   br(),
+                   uiOutput("step1_msg"),
+                   uiOutput("choose_string"),
+                   uiOutput("chosen_string")
+            ),
+            column(width = 8,
+                   uiOutput("step2detail")
+            )
+          ),
+          DT::dataTableOutput("step2table")
       ),
       tabPanel("Step 3 - Download Results",
          br(),
@@ -94,10 +93,7 @@ ui <- fluidPage(
   ),
   hr(),
   #footer ----
-  HTML(paste0("<br><br><br><div class=\"footer navbar-fixed-bottom\" style=\"background: #FFFFFF;\"><br><p>&nbsp;&nbsp;<a href=\"http://dpo.si.edu\" target = _blank><img src=\"dpologo.jpg\"></a> | ", app_name, ", ver. ", app_ver, " | <a href=\"", github_link, "\" target = _blank>Source code</a></p></div>")),
-  #Fix for category buttons
-  HTML("<style>
-       .btn{margin-bottom: 10px;}</style>")
+  HTML(paste0("<br><br><br><div class=\"footer navbar-fixed-bottom\" style=\"background: #FFFFFF;\"><br><p>&nbsp;&nbsp;<a href=\"http://dpo.si.edu\" target = _blank><img src=\"dpologo.jpg\"></a> | ", app_name, ", ver. ", app_ver, " | <a href=\"", github_link, "\" target = _blank>Source code</a></p></div>"))
 )
 
 
@@ -330,7 +326,6 @@ server <- function(input, output, session) {
     #progress0$set(message = "Done! Saving results...", value = 1)
     progress0$set(message = "Done!", value = 1)
     
-    
     res_df <- data.frame(matrix(ncol = 4, nrow = 0, data = NA))
     for (i in seq(1, length(results))){
       data <- data.frame(results[[i]])
@@ -339,6 +334,7 @@ server <- function(input, output, session) {
     
     names(res_df) = c("csv_rowid", "aat_term", "aat_id", "aat_note")
     res_df <- dplyr::filter(res_df, !is.na(aat_id))
+    res_df <- dplyr::distinct(res_df)
     
     #Add table of results
     dbWriteTable(csvinput_db, "matches", res_df, overwrite = TRUE)
@@ -373,6 +369,14 @@ server <- function(input, output, session) {
     results_table <- dplyr::select(results_table, -aat_id_int)
     results_table <- dplyr::select(results_table, -no_matches)
     results_table <- dplyr::select(results_table, -selected)
+    
+    if (keywords_field == FALSE){
+      results_table <- dplyr::select(results_table, -keywords)
+    }
+    
+    if (linked_field == FALSE){
+      results_table <- dplyr::select(results_table, -linked_aat_term)
+    }
     
     no_cols <- dim(results_table)[2]
     
@@ -477,146 +481,17 @@ server <- function(input, output, session) {
   })
   
   
-  #aattop----
-  # output$aattop <- renderUI({
-  #   getty_url <- "http://vocab.getty.edu/sparql.json?query="
-  #   getty_top <- "select * {?f a gvp:Facet; skos:inScheme aat: ; gvp:prefLabelGVP/xl:literalForm ?l}"
-  #   getty_query <- URLencode(getty_top, reserved = FALSE)
-  #   json_top <- fromJSON(paste0(getty_url, getty_query))
-  #   
-  #   categories <- c("[All]", json_top$results$bindings$l$value)
-  #   categories <- stringr::str_replace_all(categories, ' Facet', '')
-  #   ids <- c("all", json_top$results$bindings$f$value)
-  #   ids <- stringr::str_replace_all(ids, 'http://vocab.getty.edu/aat/', '')
-  #   
-  #   top_categories <- cbind(categories, ids)
-  #   
-  #   radioGroupButtons("topcats", "Search in this AAT category:",
-  #                     choiceNames = categories,
-  #                     choiceValues = ids,
-  #                     direction = "horizontal",
-  #                     individual = TRUE,
-  #                     status = "primary",
-  #                     selected = "all")
-  # })
-  
-  
-  #aatsub----
-  # output$aatsub <- renderUI({
-  #   req(input$topcats)
-  #   if (input$topcats != "all"){
-  #     #Sub categories
-  #     getty_url <- "http://vocab.getty.edu/sparql.json?query="
-  #     getty_q <- "select * {?x gvp:broader aat:%s; skos:inScheme aat: ; gvp:prefLabelGVP/xl:literalForm ?l}"
-  #     getty_q <- sprintf(getty_q, input$topcats)
-  #     
-  #     getty_query <- URLencode(getty_q, reserved = FALSE)
-  #     json_top <- fromJSON(paste0(getty_url, getty_query))
-  #     
-  #     subcategories <- json_top$results$bindings$l$value
-  #     subcategories <- stringr::str_replace_all(subcategories, 'hierarchy name', '')
-  #     subcategories <- stringr::str_replace_all(subcategories, '[(]', '')
-  #     subcategories <- stringr::str_replace_all(subcategories, '[)]', '')
-  #     subcategories <- stringr::str_trim(subcategories)
-  #     
-  #     subcats_ids <- json_top$results$bindings$x$value
-  #     subcats_ids <- stringr::str_replace_all(subcats_ids, 'http://vocab.getty.edu/aat/', '')
-  #     
-  #     sub_categories <- cbind(subcategories, subcats_ids)
-  #     
-  #     radioGroupButtons("subcats", "Search in this subcategory:",
-  #                       choiceNames = subcategories,
-  #                       choiceValues = subcats_ids,
-  #                       direction = "horizontal",
-  #                       individual = TRUE,
-  #                       status = "default", 
-  #                       selected = NA, 
-  #                       size = "sm")
-  #   }
-  # })
-  
-  
-  #topcategories----
-  # output$topcategories <- renderUI({
-  #   req(input$csvinput)
-  #   tagList(
-  #     HTML("<div class=\"panel panel-primary\"> <div class=\"panel-heading\"> <h3 class=\"panel-title\">Filter results by AAT Top-level Subjects</h3> </div> <div class=\"panel-body\">"),
-  #     uiOutput("aattop"),
-  #     hr(),
-  #     uiOutput("aatsub"),
-  #     HTML("</div></div>")
-  #   )
-  # })
-  
   
   #step2table----
   output$step2table <- DT::renderDataTable({
     req(input$csvinput)
     req(input$row)
-    #req(input$topcats)
     
-    #csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
     this_query <- paste0("SELECT * FROM matches WHERE csv_rowid = ", input$row)
     flog.info(paste0("this_query: ", this_query), name = "locations")
     csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
     results <<- dbGetQuery(csvinput_db, this_query)
     dbDisconnect(csvinput_db)
-    
-    # getty_url <- "http://vocab.getty.edu/sparql.json?query="
-    # getty_query <- "select ?Subject ?Term ?Parents ?ScopeNote {
-    #         	          ?Subject a skos:Concept; luc:term \"%s\"; 
-    #         	          gvp:broaderExtended aat:%s;
-    #         	          skos:inScheme aat: ; 
-    #         	          gvp:prefLabelGVP [xl:literalForm ?Term]. 
-    #         	          optional {?Subject gvp:parentString ?Parents}
-    #         	          optional {?Subject skos:scopeNote [dct:language gvp_lang:en; rdf:value ?ScopeNote]}
-    #                   }"
-    # 
-    # if (length(input$subcats) == 1){
-    #   getty_query <- sprintf(getty_query, this_row$term, input$subcats)
-    # }else{
-    #   if (input$topcats == "all"){
-    #     getty_query <- sprintf(getty_query, this_row$term, "")
-    #     getty_query <- stringr::str_replace(getty_query, "gvp:broaderExtended aat:;", "")
-    #   }else{
-    #     getty_query <- sprintf(getty_query, this_row$term, input$topcats)
-    #   }
-    # }
-    # 
-    # flog.info(paste0("Item query: ", getty_query), name = "getty")
-    # 
-    # getty_query <- URLencode(getty_query, reserved = FALSE)
-    # json <- fromJSON(paste0(getty_url, getty_query))
-    # 
-    # if (length(json$results$bindings$Subject$value) > 0){
-    #   #Get the parent strings, remove pipes and other formatting
-    #   parents_strings <- str_replace_all(string = json$results$bindings$Parents$value, pattern = ">", replacement = "")
-    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "<", replacement = "|")
-    #   parents_strings <- str_replace_all(string = parents_strings, pattern = ", ", replacement = "|")
-    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[|][|]", replacement = "|")
-    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[||]", replacement = "|")
-    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[ ][)]", replacement = ")")
-    #   parents_strings <- str_replace_all(string = parents_strings, pattern = "[|]", replacement = "|")
-    #   
-    #   for (p in 1:length(parents_strings)){
-    #     parent_string <- parents_strings[p]
-    #     parent_string_split <- stringr::str_split(parent_string, '[|]')[[1]]
-    #     parent_string_split_ordered <- rev(parent_string_split)
-    #     p_string <- parent_string_split_ordered
-    #     p_string <- p_string[p_string != ""]
-    #     for (s in 2:length(p_string)){
-    #       p_string[s] <- paste0(paste0(rep('.', s - 1), collapse = ""), " ", p_string[s], collapse = "")
-    #     }
-    #     parents_strings[p] <- paste(p_string, collapse = "<br>")
-    #   }
-      
-      #results <<- data.frame(id = str_replace(string = json$results$bindings$Subject$value, pattern = "http://vocab.getty.edu/aat/", replacement = ""), term = json$results$bindings$Term$value, parents = parents_strings, note = json$results$bindings$ScopeNote$value)
-    #   
-    #   results_table <- dplyr::select(results, -1)
-    # }else{
-    #   results <<- data.frame(id = NA, term = NA, parents = NA, note = NA)
-    #   results_table <- dplyr::select(results, -1)
-    # }
     
     results_table <- dplyr::select(results, -csv_rowid)
     results_table <- dplyr::select(results_table, -selected)
@@ -631,8 +506,8 @@ server <- function(input, output, session) {
                   ), 
                   rownames = FALSE, 
                   selection = 'single',
-                  caption = "Select a subject to match") #%>% formatStyle("parents", "white-space" = "nowrap") %>% formatStyle("term", "white-space" = "nowrap")
-
+                  caption = "Select a subject to match") #%>% formatStyle("term", "white-space" = "nowrap") 
+                  #%>% formatStyle("parents", "white-space" = "nowrap") 
   })
   
   
@@ -661,8 +536,7 @@ server <- function(input, output, session) {
       this_row <- dbGetQuery(csvinput_db, paste0("SELECT * FROM csv WHERE rowid = ", input$row))
       this_row_term <- this_row$term
       this_row_id <- this_row$id
-      #row_count <- dbGetQuery(csvinput_db, paste0("SELECT count(*) AS no_rows FROM csv WHERE aat_id IS NULL AND term = '", this_row_term, "'"))
-      
+
       dbDisconnect(csvinput_db)
       
       tagList(
@@ -672,9 +546,6 @@ server <- function(input, output, session) {
         HTML("</dd></dl></p>"),
         # Save button
         actionButton("saverow", paste0("Save this AAT term for item ID ", this_row_id), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon")),
-        # br(),
-        # br(),
-        # if (row_count$no_rows > 1){actionButton("saverowall", paste0("Save this AAT term for the ", row_count$no_rows, " rows with term: ", this_row_term), class = "btn btn-primary", icon = icon("ok", lib = "glyphicon"))},
         HTML("</div></div>")
       )
     }else{
@@ -746,25 +617,6 @@ server <- function(input, output, session) {
     })
   })
   
-  
-  #saverowall, observe----
-  # observeEvent(input$saverowall, {
-  #   req(input$csvinput)
-  #   req(input$row)
-  #   req(input$step2table_rows_selected)
-  #   
-  #   selected_row <- results[input$step2table_rows_selected, ]
-  #   
-  #   csvinput_db <- dbConnect(RSQLite::SQLite(), csv_database)
-  #   this_row_term <- dbGetQuery(csvinput_db, paste0("SELECT term from csv WHERE rowid = ", input$row))
-  #   query <- paste0("UPDATE csv SET aat_id = 'aat:", selected_row[1], "', aat_term = '", selected_row[2], "', aat_note = '", selected_row[3], "' WHERE term = '", this_row_term, "' AND aat_id IS NULL")
-  #   flog.info(paste0("update query: ", query), name = "getty")
-  #   n <- dbExecute(csvinput_db, query)
-  #   dbDisconnect(csvinput_db)
-  #   output$chosen_string <- renderUI({
-  #     HTML(paste0("<br><div class=\"alert alert-success\" role=\"alert\">Term saved for objects with term: ", this_row_term, "</div>"))
-  #   })
-  # })
   
   
   #downloadcsv1----
@@ -849,6 +701,6 @@ shinyApp(ui = ui, server = server, onStart = function() {
   onStop(function() {
     cat("Closing\n")
     try(dbDisconnect(csvinput_db), silent = TRUE)
-    try(unlink(csv_database), silent = TRUE)
+    #try(unlink(csv_database), silent = TRUE)
   })
 })

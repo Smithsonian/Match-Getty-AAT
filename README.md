@@ -41,4 +41,4 @@ Any other columns in the input file will be ignored but returned in the results 
 
 Install the required packages:
 
-install.packages(c("shiny", "DT", "dplyr", "stringr", "jsonlite", "futile.logger", "RSQLite", "shinyWidgets", "shinycssloaders", "WriteXLS", "openxlsx"))
+install.packages(c("shiny", "DT", "dplyr", "stringr", "jsonlite", "futile.logger", "RSQLite", "shinyWidgets", "shinycssloaders", "WriteXLS", "openxlsx", "tokenizers", "stopwords"))
