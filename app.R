@@ -348,9 +348,10 @@ server <- function(input, output, session) {
     #Get fresh version of table to display
     this_query <- paste0("SELECT c.rowid, c.*, m.*, REPLACE(m.aat_id, 'aat:', '') as aat_id_int, COALESCE(m1.no_matches, 0) as no_matches, COALESCE(m1.no_matches, 0) as 'Number of matches' FROM csv c LEFT JOIN (SELECT csv_rowid, COUNT(*) AS no_matches FROM matches GROUP BY csv_rowid) m1 ON c.rowid = m1.csv_rowid LEFT JOIN matches m ON m1.csv_rowid = m.csv_rowid AND (m1.no_matches == 1 OR m1.no_matches IS NULL)")
     flog.info(paste0("this_query: ", this_query), name = "locations")
-    resultsdf1 <- dbGetQuery(csvinput_db, this_query)
     
-    resultsdf <<- dplyr::select(resultsdf1, -aat_id_int)
+    # resultsdf1 <- dbGetQuery(csvinput_db, this_query)
+    # resultsdf <<- dplyr::select(resultsdf1, -aat_id_int)
+    resultsdf <<- dbGetQuery(csvinput_db, this_query)
     
     total_rows <- dim(resultsdf)[1]
     
@@ -361,7 +362,7 @@ server <- function(input, output, session) {
     
     dbDisconnect(csvinput_db)
     
-    results_table <- dplyr::select(resultsdf1, -aat_note)
+    results_table <- dplyr::select(resultsdf, -aat_note)
     results_table <- dplyr::select(results_table, -csv_rowid)
     results_table <- dplyr::select(results_table, -rowid)
     results_table <- dplyr::select(results_table, -aat_term)
@@ -424,7 +425,7 @@ server <- function(input, output, session) {
                 <h3 class=\"panel-title\">Match found</h3>
               </div>
               <div class=\"panel-body\">"),
-        HTML(paste0("<dl class=\"dl-horizontal\"><dt>Term</dt><dd>", res$aat_term, 
+        HTML(paste0("<dl><dt>Term</dt><dd>", res$aat_term, 
                     "</dd><dt>AAT ID</dt><dd>", res$aat_id_int, " ",
                     actionLink("showaat2", label = "", icon = icon("info-sign", lib = "glyphicon"), title = "AAT page for this term", alt = "AAT page for this term"))),
         HTML(paste0("</dd><dt>Notes</dt><dd>", AAT_term_notes, "</dd></dl>")),

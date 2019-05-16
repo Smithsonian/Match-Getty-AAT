@@ -8,15 +8,25 @@ This app was made by the Digitization Program Office, OCIO.
 
 The AAT is queried using their Linked Open Data SPARQL endpoint: http://vocab.getty.edu/queries
 
+![General information and instructions for the [input file](#input-file).](docs/AATScreen1.png)
+
 ## Steps
 
 This app will take the string in the column "term" and match it with the The Art & Architecture Thesaurus using their Linked Open Data portal.
 
-Steps:
+Steps and screenshots:
 
-1. Batch Matching of Subjects: Automated match based on the term and keywords.
-1. Manual Matching of Subjects: Select the appropiate match by executing a full text search.
-1. Download Results: Download a file with the rows from the input file with the match from the AAT.
+### Step 1. Batch Matching of Subjects: Automated match based on the term and keywords.
+
+![The term in each row is matched to the AAT. If there are more than one matches, the user can select the best one in the next step.](docs/AATScreen2.png)
+
+### Step 2. Manual Matching of Subjects: Select the appropiate match by executing a full text search.
+
+![Select the best AAT term for the row.](docs/AATScreen3.png)
+
+### Step 3. Download Results: Download a CSV or Excel file with the rows from the input file with the match from the AAT.
+
+![Download the results file in CSV or Excel.](docs/AATScreen4.png)
 
 ## Input File
 
@@ -32,7 +42,7 @@ The input file must be encoded using UTF-8 and have at least these 2 columns:
 
 Two columns are optional:
 
- * keywords - words or phrases (separated by pipes: |) to filter matching term
+ * keywords - words or phrases to filter matching terms
  * linked_aat_term - AAT term from previous efforts
 
 Any other columns in the input file will be ignored but returned in the results file.
