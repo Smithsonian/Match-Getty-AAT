@@ -16,7 +16,7 @@ library(openxlsx)
 
 #Settings----
 app_name <- "Match Getty AAT"
-app_ver <- "0.5.0"
+app_ver <- "0.5.1"
 github_link <- "https://github.com/Smithsonian/Match-Getty-AAT"
 csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d_%H%M%S_"), (runif(1) * 10000), ".sqlite3")
 options(stringsAsFactors = FALSE)
@@ -24,8 +24,8 @@ options(encoding = 'UTF-8')
 
 #How many parallel queries to run, 
 # too many will cause errors
-# 4 seems to work fine
-no_cores <- 4
+# 4 seems to be a top limit
+no_cores <- 2
 
 
 #load functions
