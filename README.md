@@ -48,3 +48,14 @@ Any other columns in the input file will be ignored but returned in the results 
 Install the required packages:
 
 install.packages(c("shiny", "DT", "dplyr", "stringr", "jsonlite", "futile.logger", "RSQLite", "shinyWidgets", "shinycssloaders", "WriteXLS", "openxlsx", "tokenizers", "stopwords"))
+
+To run the app locally, without the need of a server, just install R and the packages above. Then, run a command that will download the source files from Github. 
+
+R version 3.3 or better is required. After starting R, copy and paste these commands:
+
+```R
+install.packages(c("shiny", "DT", "dplyr", "stringr", "jsonlite", "futile.logger", "RSQLite", "shinyWidgets", "shinycssloaders", "WriteXLS", "openxlsx", "tokenizers", "stopwords"))
+
+library(shiny)
+runGitHub("Match-Getty-AAT", "Smithsonian")
+```
