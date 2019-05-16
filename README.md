@@ -10,21 +10,17 @@ The AAT is queried using their Linked Open Data SPARQL endpoint: http://vocab.ge
 
 ![General information and instructions for the [input file](#input-file).](docs/AATScreen1.png)
 
-## Steps
+## Steps and screenshots
 
-This app will take the string in the column "term" and match it with the The Art & Architecture Thesaurus using their Linked Open Data portal.
-
-Steps and screenshots:
-
-### Step 1. Batch Matching of Subjects: Automated match based on the term and keywords.
+### Step 1. Batch Matching of Subjects: Automated match based on the term and keywords
 
 ![The term in each row is matched to the AAT. If there are more than one matches, the user can select the best one in the next step.](docs/AATScreen2.png)
 
-### Step 2. Manual Matching of Subjects: Select the appropiate match by executing a full text search.
+### Step 2. Manual Matching of Subjects: Select the appropiate match by executing a full text search
 
 ![Select the best AAT term for the row.](docs/AATScreen3.png)
 
-### Step 3. Download Results: Download a CSV or Excel file with the rows from the input file with the match from the AAT.
+### Step 3. Download Results: Download a CSV or Excel file with the rows from the input file with the match from the AAT
 
 ![Download the results file in CSV or Excel.](docs/AATScreen4.png)
 
