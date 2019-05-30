@@ -106,8 +106,9 @@ find_aat <- function(which_row){
     
     #Format the term for searching
     string_to_find <- stringr::str_replace_all(this_row$term, "'", "")
-    string_to_find <- stringr::str_replace_all(string_to_find, ",", "")
-    string_to_find <- stringr::str_replace_all(string_to_find, ";", "")
+    string_to_find <- stringr::str_replace_all(string_to_find, ",", " ")
+    string_to_find <- stringr::str_replace_all(string_to_find, ";", " ")
+    string_to_find <- stringr::str_squish(string_to_find)
     string_to_find <- stringr::str_split(string_to_find, " ")[[1]]
     string_formatted <- paste0(string_to_find, collapse = " AND ")
     

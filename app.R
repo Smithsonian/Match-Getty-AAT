@@ -16,7 +16,7 @@ library(openxlsx)
 
 #Settings----
 app_name <- "Match Getty AAT"
-app_ver <- "0.5.1"
+app_ver <- "0.5.2"
 github_link <- "https://github.com/Smithsonian/Match-Getty-AAT"
 csv_database <- paste0("data/csv_", format(Sys.time(), "%Y%m%d_%H%M%S_"), (runif(1) * 10000), ".sqlite3")
 options(stringsAsFactors = FALSE)
