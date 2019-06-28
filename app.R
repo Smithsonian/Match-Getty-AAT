@@ -572,7 +572,7 @@ server <- function(input, output, session) {
     
     res <- results[input$step2table_rows_selected, ]
     
-    AAT_url <- paste0("http://vocab.getty.edu/page/aat/", res$id)
+    AAT_url <- stringr::str_replace(res$aat_id, "aat:", "http://vocab.getty.edu/page/aat/")
     
     showModal(modalDialog(
       title = "AAT Term Info",
