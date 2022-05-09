@@ -1,3 +1,5 @@
+**This repo is now archived. Getty now has an [OpenRefine Reconciliation Service](https://www.getty.edu/research/tools/vocabularies/obtain/openrefine.html) that makes this redundant.**
+
 # Match Getty AAT
 
 Match Getty AAT is a prototype app that matches terms in a file to the Getty Art & Architecture Thesaurus using their Linked Open Data portal.
